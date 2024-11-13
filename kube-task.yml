@@ -1,0 +1,63 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    run: cloud-mesh
+  name: cloud-mesh
+spec:
+  replicas: 32 # number of pods to run
+  selector:
+    matchLabels:
+      run: cloud-mesh
+  strategy:
+    rollingUpdate:
+      maxSurge: 100%
+      maxUnavailable: 10
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        run: cloud-mesh # metadata label attached to pod
+    spec:
+      containers:
+        - image: bdpedigo/cloud-mesh:v5 # image to pull from dockerhub
+          name: cloud-mesh # name of container in pod
+          imagePullPolicy: Always
+          command: ["/bin/sh"]
+          # runners/predict_synapse_compartments_2024-11-07.py
+          args: ["-c", "while true; do uv run runners/predict_synapse_compartments_2024-11-07.py; done"]
+          env:
+            - name: CLOUDSDK_CORE_PROJECT
+              value: ${CLOUDSDK_CORE_PROJECT}
+            - name: GOOGLE_APPLICATION_CREDENTIALS
+              value: "/root/.cloudvolume/secrets/google-secret.json" #TODO
+            - name: VERBOSE
+              value: "true"
+            - name: REPLICAS
+              value: "32"
+            - name: OPENBLAS_NUM_THREADS
+              value: "1"
+            - name: MKL_NUM_THREADS
+              value: "1"
+            - name: NUMEXPR_NUM_THREADS
+              value: "1"
+            - name: OMP_NUM_THREADS
+              value: "1"
+            - name: QUEUE_NAME
+              value: "ben-skedit"
+            - name: RUN
+              value: "true"
+          resources:
+            requests:
+              memory: 3.0Gi
+              cpu: "900m"
+            limits:
+              memory: 8.0Gi
+          volumeMounts:
+            - name: secrets-volume
+              mountPath: /root/.cloudvolume/secrets
+      dnsPolicy: Default
+      volumes:
+        - name: secrets-volume
+          secret:
+            secretName: secrets

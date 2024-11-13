@@ -1,0 +1,19 @@
+[project]
+dependencies = [
+    "caveclient>=6.5.0",
+    "cloud-files>=4.27.0",
+    "cloud-volume>=11.0.2",
+    "fast-simplification>=0.1.7",
+    "joblib>=1.4.2",
+    "meshspice",
+    "pymeshfix>=0.17.0",
+    "scikit-learn>=1.5.2",
+    "task-queue>=2.14.0",
+]
+name = "cloud-mesh"
+readme = "README.md"
+requires-python = ">=3.12"
+version = "0.1.0"
+
+[tool.uv.sources]
+meshspice = { path = "../meshspice" }
