@@ -283,10 +283,11 @@ dependencies = [
     { name = "cloud-volume" },
     { name = "fast-simplification" },
     { name = "joblib" },
-    { name = "meshspice" },
+    { name = "meshmash" },
     { name = "pymeshfix" },
     { name = "scikit-learn" },
     { name = "task-queue" },
+    { name = "toml" },
 ]
 
 [package.metadata]
@@ -296,10 +297,11 @@ requires-dist = [
     { name = "cloud-volume", specifier = ">=11.0.2" },
     { name = "fast-simplification", specifier = ">=0.1.7" },
     { name = "joblib", specifier = ">=1.4.2" },
-    { name = "meshspice", directory = "../meshspice" },
+    { name = "meshmash", directory = "../meshmash" },
     { name = "pymeshfix", specifier = ">=0.17.0" },
     { name = "scikit-learn", specifier = ">=1.5.2" },
     { name = "task-queue", specifier = ">=2.14.0" },
+    { name = "toml", specifier = ">=0.10.2" },
 ]
 
 [[package]]
@@ -956,19 +958,26 @@ wheels = [
 ]
 
 [[package]]
-name = "meshspice"
+name = "meshmash"
 version = "0.1.0"
-source = { directory = "../meshspice" }
+source = { directory = "../meshmash" }
 dependencies = [
+    { name = "numpy" },
+    { name = "pandas" },
+    { name = "pymeshfix" },
     { name = "pyvista" },
+    { name = "robust-laplacian" },
     { name = "scipy" },
     { name = "tqdm-joblib" },
 ]
 
 [package.metadata]
 requires-dist = [
-    { name = "potpourri3d", marker = "extra == 'extras'", specifier = ">=1.1.0" },
+    { name = "numpy", specifier = "<2" },
+    { name = "pandas", specifier = ">=2.2.3" },
+    { name = "pymeshfix", specifier = ">=0.17.0" },
     { name = "pyvista", specifier = ">=0.44.1" },
+    { name = "robust-laplacian", specifier = ">=1.0.0" },
     { name = "scipy", specifier = ">=1.13.0,<=1.14.0" },
     { name = "tqdm-joblib", specifier = ">=0.0.4" },
 ]
@@ -995,8 +1004,12 @@ dependencies = [
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/e9/34/1acca6e18697017ad5c8b45279b59305d660ecf2fbed13e5f406f69890e4/multiprocess-0.70.17.tar.gz", hash = "sha256:4ae2f11a3416809ebc9a48abfc8b14ecce0652a0944731a1493a3c1ba44ff57a", size = 1785744 }
 wheels = [
+    { url = "https://files.pythonhosted.org/packages/e7/a9/39cf856d03690af6fd570cf40331f1f79acdbb3132a9c35d2c5002f7f30b/multiprocess-0.70.17-py310-none-any.whl", hash = "sha256:38357ca266b51a2e22841b755d9a91e4bb7b937979a54d411677111716c32744", size = 134830 },
+    { url = "https://files.pythonhosted.org/packages/b2/07/8cbb75d6cfbe8712d8f7f6a5615f083c6e710ab916b748fbb20373ddb142/multiprocess-0.70.17-py311-none-any.whl", hash = "sha256:2884701445d0177aec5bd5f6ee0df296773e4fb65b11903b94c613fb46cfb7d1", size = 144346 },
     { url = "https://files.pythonhosted.org/packages/a4/69/d3f343a61a2f86ef10ed7865a26beda7c71554136ce187b0384b1c2c9ca3/multiprocess-0.70.17-py312-none-any.whl", hash = "sha256:2818af14c52446b9617d1b0755fa70ca2f77c28b25ed97bdaa2c69a22c47b46c", size = 147990 },
     { url = "https://files.pythonhosted.org/packages/c8/b7/2e9a4fcd871b81e1f2a812cd5c6fb52ad1e8da7bf0d7646c55eaae220484/multiprocess-0.70.17-py313-none-any.whl", hash = "sha256:20c28ca19079a6c879258103a6d60b94d4ffe2d9da07dda93fb1c8bc6243f522", size = 149843 },
+    { url = "https://files.pythonhosted.org/packages/ae/d7/fd7a092fc0ab1845a1a97ca88e61b9b7cc2e9d6fcf0ed24e9480590c2336/multiprocess-0.70.17-py38-none-any.whl", hash = "sha256:1d52f068357acd1e5bbc670b273ef8f81d57863235d9fbf9314751886e141968", size = 132635 },
+    { url = "https://files.pythonhosted.org/packages/f9/41/0618ac724b8a56254962c143759e04fa01c73b37aa69dd433f16643bd38b/multiprocess-0.70.17-py39-none-any.whl", hash = "sha256:c3feb874ba574fbccfb335980020c1ac631fbf2a3f7bee4e2042ede62558a021", size = 133359 },
 ]
 
 [[package]]
@@ -1275,8 +1288,6 @@ version = "6.1.0"
 source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/26/10/2a30b13c61e7cf937f4adf90710776b7918ed0a9c434e2c38224732af310/psutil-6.1.0.tar.gz", hash = "sha256:353815f59a7f64cdaca1c0307ee13558a0512f6db064e92fe833784f08539c7a", size = 508565 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/da/2b/f4dea5d993d9cd22ad958eea828a41d5d225556123d372f02547c29c4f97/psutil-6.1.0-cp27-none-win32.whl", hash = "sha256:9118f27452b70bb1d9ab3198c1f626c2499384935aaf55388211ad982611407e", size = 246648 },
-    { url = "https://files.pythonhosted.org/packages/9f/14/4aa97a7f2e0ac33a050d990ab31686d651ae4ef8c86661fef067f00437b9/psutil-6.1.0-cp27-none-win_amd64.whl", hash = "sha256:a8506f6119cff7015678e2bce904a4da21025cc70ad283a53b099e7620061d85", size = 249905 },
     { url = "https://files.pythonhosted.org/packages/01/9e/8be43078a171381953cfee33c07c0d628594b5dbfc5157847b85022c2c1b/psutil-6.1.0-cp36-abi3-macosx_10_9_x86_64.whl", hash = "sha256:6e2dcd475ce8b80522e51d923d10c7871e45f20918e027ab682f94f1c6351688", size = 247762 },
     { url = "https://files.pythonhosted.org/packages/1d/cb/313e80644ea407f04f6602a9e23096540d9dc1878755f3952ea8d3d104be/psutil-6.1.0-cp36-abi3-macosx_11_0_arm64.whl", hash = "sha256:0895b8414afafc526712c498bd9de2b063deaac4021a3b3c34566283464aff8e", size = 248777 },
     { url = "https://files.pythonhosted.org/packages/65/8e/bcbe2025c587b5d703369b6a75b65d41d1367553da6e3f788aff91eaf5bd/psutil-6.1.0-cp36-abi3-manylinux_2_12_i686.manylinux2010_i686.manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:9dcbfce5d89f1d1f2546a2090f4fcf87c7f669d1d90aacb7d7582addece9fb38", size = 284259 },
@@ -1513,6 +1524,33 @@ wheels = [
 ]
 
 [[package]]
+name = "robust-laplacian"
+version = "1.0.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/16/fb/3d8be3fd72d1183b55bd79603d9bb6c15093f803cbe0c760c38ac4742e3b/robust_laplacian-1.0.0.tar.gz", hash = "sha256:a00d7c225e40b6f9a1b9c8de0c5cb51dadd35367e3fe61b265a4643165b4e08d", size = 29411838 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/6f/61/be7469f480c2f55d75d7c767a65f31d307ea9c3990f4c327b05930ef7988/robust_laplacian-1.0.0-cp312-cp312-macosx_10_13_x86_64.whl", hash = "sha256:f4f868968615fb28ba647844f9ab73666aa5a401265f5facac86669a25b4eff5", size = 2787252 },
+    { url = "https://files.pythonhosted.org/packages/c5/72/796e9e807f654df8ab73b1ca3c27058d946c45dff0a168ef29bb2c07409a/robust_laplacian-1.0.0-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:d6d272307b4fd7a7ba32e7c09ca3355bdcb5cd78ac56e7da88204fce98deee8b", size = 2485424 },
+    { url = "https://files.pythonhosted.org/packages/43/37/450122e8e67452db294c98a9e29da60f9826f3aa9b718a3106e7e93e80de/robust_laplacian-1.0.0-cp312-cp312-manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:8ce1bb11e33a823bf66a2ec8d868510d497e72074511b9b1d67936d77de50a09", size = 2717375 },
+    { url = "https://files.pythonhosted.org/packages/bc/98/da4669ee43d49d27d695b52d4d54f9cafa328e450cc99d90da787a24b410/robust_laplacian-1.0.0-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:d68af953f77e0430c182067e8de6695ebe104b337d2c4486731e4a471eae5082", size = 2574482 },
+    { url = "https://files.pythonhosted.org/packages/9d/3f/47ea261192cd14a73eb0176134298fc31cd2879e05ccf166875e2379327b/robust_laplacian-1.0.0-cp312-cp312-musllinux_1_2_i686.whl", hash = "sha256:e64180893ce84ba2a1cd2f8acd418f3d1ed9e36fdddaa4138739261b6d8d02c5", size = 3874877 },
+    { url = "https://files.pythonhosted.org/packages/ef/c0/c2767e36b5414aa2b1f296d44aa3b2c5e1aaeb22ffca1125c35ded327f17/robust_laplacian-1.0.0-cp312-cp312-musllinux_1_2_x86_64.whl", hash = "sha256:8d46a25dc26117d6fe9e6634acdc0ffdce6e2e14b24ab7589a688c923c42c66e", size = 3673749 },
+    { url = "https://files.pythonhosted.org/packages/7c/ef/7b60577f0848659c7f2cbc1172f238835adebffdd383a73df5d3a70131c4/robust_laplacian-1.0.0-cp312-cp312-win32.whl", hash = "sha256:a2bf9823e7aadf4ed56bca1507931b64d526f28ac06e180e87c45ece92cf0a36", size = 3731037 },
+    { url = "https://files.pythonhosted.org/packages/2d/cb/b9f5c60377759181a70140ef387634ec99984d27d2a7753ebbb7367cbc09/robust_laplacian-1.0.0-cp312-cp312-win_amd64.whl", hash = "sha256:bf8ca367814e85a4ae915338e5d092c7ffd6c6a4f2450dd56bc904aebee5618f", size = 5236638 },
+    { url = "https://files.pythonhosted.org/packages/aa/53/ade99e2be294d984294490736bba66daeab3ba7a902e4217f67d2eaac356/robust_laplacian-1.0.0-cp313-cp313-macosx_10_13_x86_64.whl", hash = "sha256:18cd9c178a3b8e35a3b80e67c090bc50169ccd7add3fe8569d5d08e13e63cb08", size = 2787392 },
+    { url = "https://files.pythonhosted.org/packages/bd/0f/2af2f08b68ff4ae1cf1195e23a642d08002ad63ce27849597610a3048dbb/robust_laplacian-1.0.0-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:643613bcf035bfecbdc8de253e6788206a433495f70b1c23ebbf717331aca585", size = 2485552 },
+    { url = "https://files.pythonhosted.org/packages/76/76/dfeecb12afb11799737e61c751c3705e01d023a0c7d2bcc66749b8cfd5fc/robust_laplacian-1.0.0-cp313-cp313-manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:2900051d8e70e389c5b04dd2ca361608eb116de3989334b0e89a9fab1cccfc2a", size = 2717239 },
+    { url = "https://files.pythonhosted.org/packages/9c/2e/6f6ee63e9477794e22be513c1494996023a5f344d8a3944a2cacd0c008b0/robust_laplacian-1.0.0-cp313-cp313-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:660f16dbdd4ca51797b583af51eeb4a6d673a8c8f3613b4cb049bcc5aa3b8ec2", size = 2574545 },
+    { url = "https://files.pythonhosted.org/packages/7c/01/86412aef2ceff37bab95d5358fe1465b8c7f3db7f88f2aaa5bb05fb18a16/robust_laplacian-1.0.0-cp313-cp313-musllinux_1_2_i686.whl", hash = "sha256:0fb53757d128b8786cea9a6dce908583220fc6186f14623d08c2049925b3bcb0", size = 3874714 },
+    { url = "https://files.pythonhosted.org/packages/f8/b7/f8777bed41afea527e24d28e92afdc528b5c630243613e2178198569be63/robust_laplacian-1.0.0-cp313-cp313-musllinux_1_2_x86_64.whl", hash = "sha256:26bac12eb42693368e2ff25a7d36cf9c71ff7f7afdba15a54bb17dd092a12b20", size = 3674743 },
+    { url = "https://files.pythonhosted.org/packages/22/e5/25274943c6473b4aad73b2cdfa94c2b5938dca143b4926d9ee8ef5ae0c06/robust_laplacian-1.0.0-cp313-cp313-win32.whl", hash = "sha256:7033f1779971bbaf5fd713e790ec72278b587a341a7d91ca1591a1a64170cb3d", size = 3731116 },
+    { url = "https://files.pythonhosted.org/packages/c1/d2/a674eb08c56bfb94c4aac27856d33effa365936acbb9ac372add0e8e18b3/robust_laplacian-1.0.0-cp313-cp313-win_amd64.whl", hash = "sha256:1720bab4b83943956f8bd6cc7722a699529d3c498e8ae3d820b0f0592c445812", size = 5236703 },
+]
+
+[[package]]
 name = "rpds-py"
 version = "0.21.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1714,6 +1752,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/bd/55/b5148dcbf72f5cde221f8bfe3b6a540da7aa1842f6b491ad979a6c8b84af/threadpoolctl-3.5.0.tar.gz", hash = "sha256:082433502dd922bf738de0d8bcc4fdcbf0979ff44c42bd40f5af8a282f6fa107", size = 41936 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/4b/2c/ffbf7a134b9ab11a67b0cf0726453cedd9c5043a4fe7a35d1cefa9a1bcfb/threadpoolctl-3.5.0-py3-none-any.whl", hash = "sha256:56c1e26c150397e58c4926da8eeee87533b1e32bef131bd4bf6a2f45f3185467", size = 18414 },
+]
+
+[[package]]
+name = "toml"
+version = "0.10.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/be/ba/1f744cdc819428fc6b5084ec34d9b30660f6f9daaf70eead706e3203ec3c/toml-0.10.2.tar.gz", hash = "sha256:b3bda1d108d5dd99f4a20d24d9c348e91c4db7ab1b749200bded2f839ccbe68f", size = 22253 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/44/6f/7120676b6d73228c96e17f1f794d8ab046fc910d781c8d151120c3f1569e/toml-0.10.2-py2.py3-none-any.whl", hash = "sha256:806143ae5bfb6a3c6e736a764057db0e6a0e05e338b5630894a5f779cabb4f9b", size = 16588 },
 ]
 
 [[package]]
