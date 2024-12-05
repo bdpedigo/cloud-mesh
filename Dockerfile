@@ -14,7 +14,11 @@ COPY --from=ghcr.io/astral-sh/uv:0.4.3 /uv /bin/uv
 
 # First, install the dependencies
 WORKDIR /app
-COPY ./cloud-mesh /app/cloud-mesh
+COPY ./cloud-mesh/uv.lock /app/cloud-mesh/uv.lock
+COPY ./cloud-mesh/pyproject.toml /app/cloud-mesh/pyproject.toml
+COPY ./cloud-mesh/README.md /app/cloud-mesh/README.md
+COPY ./cloud-mesh/runners /app/cloud-mesh/runners
+COPY ./cloud-mesh/models /app/cloud-mesh/models
 WORKDIR /app/cloud-mesh
 
 # RUN echo "meshrep" > /app/.uvignore
@@ -24,7 +28,8 @@ WORKDIR /app/cloud-mesh
     # uv sync --frozen --no-install-project
 
 # Then, install the rest of the project
-ADD . /app
+ADD cloudigo /app/cloudigo
+ADD meshmash /app/meshmash
 RUN uv sync
 # RUN --mount=type=cache,target=/root/.cache/uv \
 #     uv sync --frozen
@@ -34,4 +39,4 @@ ENV PATH="/app/.venv/bin:$PATH"
 ENV RUN_JOBS='True'
 ENV TEST_RUN='False'
 
-CMD ["uv", "run", "runners/predict_synapse_compartments_2024-11-07.py"]
+CMD ["uv", "run", "runners/predict_synapse_compartments_obtuse-dog-search.py"]

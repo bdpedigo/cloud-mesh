@@ -1,8 +1,9 @@
 [project]
 dependencies = [
-    "caveclient>=6.5.0",
+    "caveclient>=7.2.1",
     "cloud-files>=4.27.0",
     "cloud-volume>=11.0.2",
+    "cloudigo",
     "fast-simplification>=0.1.7",
     "joblib>=1.4.2",
     "meshmash",
@@ -18,3 +19,4 @@ version = "0.1.0"
 
 [tool.uv.sources]
 meshmash = { path = "../meshmash" }
+cloudigo = { path = "../cloudigo" }

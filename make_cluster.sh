@@ -4,9 +4,6 @@ gcloud config set project exalted-beanbag-334502
 # machine-type
 # to see list of machines, do:
 # $ gcloud compute machine-types list --filter="zone:(us-east4-b)"
-# emily used "c2d-highcpu-4"
-
-# image-type: The image type to use for the cluster. Defaults to server-specified.
 
 # disk-size: Size for node VM boot disks in GB. Defaults to 100GB.
 
@@ -14,15 +11,16 @@ gcloud config set project exalted-beanbag-334502
 # system running on nodes within the node pool.
 
 # num-nodes: The number of nodes to be created in each of the cluster's zones.
-
+# --machine-type "c2d-standard-32" \
+# gcloud container --project "exalted-beanbag-334502" clusters delete "cloud-mesh" --zone "us-west1-b"
 gcloud container --project "exalted-beanbag-334502" clusters create "cloud-mesh" \
     --zone "us-west1-b" \
     --no-enable-basic-auth \
     --release-channel "stable" \
-    --machine-type "c2d-standard-32" \
+    --machine-type "c2d-highmem-32" \
     --image-type "COS_CONTAINERD" \
     --disk-type "pd-standard" \
-    --disk-size "50" \
+    --disk-size "600" \
     --metadata disable-legacy-endpoints=true \
     --scopes "https://www.googleapis.com/auth/devstorage.read_only","https://www.googleapis.com/auth/logging.write","https://www.googleapis.com/auth/monitoring","https://www.googleapis.com/auth/servicecontrol","https://www.googleapis.com/auth/service.management.readonly","https://www.googleapis.com/auth/trace.append" \
     --preemptible \
@@ -49,4 +47,4 @@ kubectl create secret generic secrets \
     --from-file=$HOME/.cloudvolume/secrets/global.daf-apis.com-cave-secret.json \
     --from-file=$HOME/.cloudvolume/secrets/aws-secret.json \
     --from-file=$HOME/.cloudvolume/secrets/google-secret.json \
-    --from-file=$HOME/.cloudvolume/secrets/discord-secret.json \
+    --from-file=$HOME/.cloudvolume/secrets/discord-secret.json

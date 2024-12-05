@@ -1,5 +1,4 @@
 # %%
-import datetime
 import os
 import time
 from functools import partial
@@ -15,7 +14,7 @@ from fast_simplification import simplify
 from joblib import load
 from taskqueue import TaskQueue, queueable
 
-from cloudigo import put_dataframe
+from cloudigo import get_replicas_on_node, put_dataframe
 from meshmash import chunked_hks_pipeline, get_label_components, project_points_to_mesh
 
 
@@ -28,8 +27,6 @@ def replace_none(parameters):
     return parameters
 
 
-REQUEST = False
-TEST = False
 RUN = os.getenv("RUN", "true").lower() == "true"
 QUEUE_NAME = os.getenv("QUEUE_NAME", "ben-skedit")
 REPLICAS = int(os.environ.get("REPLICAS", 1))
@@ -43,9 +40,9 @@ model_folder = Path(__file__).parent.parent / "models" / MODEL_NAME
 parameters = toml.load(model_folder / "parameters.toml")
 parameters = replace_none(parameters)
 
-cloud_folder = "gs://allen-minnie-phase3/ben-ssa/{MODEL_NAME}"
+cloud_folder = f"gs://allen-minnie-phase3/ben-ssa/{MODEL_NAME}"
 cloud_path = Path(cloud_folder)
-cf = CloudFiles("gs://allen-minnie-phase3/ben-ssa/{MODEL_NAME}")
+cf = CloudFiles(f"gs://allen-minnie-phase3/ben-ssa/{MODEL_NAME}")
 
 set_session_defaults(max_retries=5, backoff_factor=0.5)
 client = CAVEclient("minnie65_phase3_v1", version=1181)
@@ -110,18 +107,24 @@ def load_model(model_name):
 def run_prediction_for_root(root_id):
     model = load_model(MODEL_NAME)
 
+    if VERBOSE:
+        print("Pulling mesh...")
     currtime = time.time()
     raw_mesh = cv.mesh.get(root_id, **parameters["cv-mesh-get"])[root_id]
     pull_mesh_time = time.time() - currtime
     mesh = (raw_mesh.vertices, raw_mesh.faces)
     raw_n_vertices = len(raw_mesh.vertices)
 
+    if VERBOSE:
+        print("Simplifying mesh...")
     currtime = time.time()
     mesh = simplify(mesh[0], mesh[1], **parameters["simplify"])
     processed_n_vertices = len(mesh[0])
     simplify_time = time.time() - currtime
 
     currtime = time.time()
+    if VERBOSE:
+        print("Loading synapses...")
     synapses = load_synapses(
         root_id,
         mesh,
@@ -139,6 +142,8 @@ def run_prediction_for_root(root_id):
         **parameters["chunked_hks_pipeline"],
     )
 
+    if VERBOSE: 
+        print("Computing predictions...")
     currtime = time.time()
     predictions_df = pd.DataFrame(index=synapses.index)
     indices = synapses["mesh_index"]
@@ -155,12 +160,16 @@ def run_prediction_for_root(root_id):
     # put_dataframe(
     #     predictions_df, cf, f"predictions/{root_id}_synapse_predictions.csv.gz"
     # )
+    if VERBOSE: 
+        print("Saving predictions...")
     put_dataframe(
         predictions_df, cloud_path / f"predictions/{root_id}_synapse_predictions.csv.gz"
     )
 
     predict_time = time.time() - currtime
 
+    if VERBOSE:
+        print("Labeling components...")
     currtime = time.time()
     pred_labels = model.predict(np.log(hks))
     label_components = get_label_components(mesh, pred_labels)
@@ -175,6 +184,9 @@ def run_prediction_for_root(root_id):
     multispine_synapses = synapses[synapses["spine_component_count"] > 1]
     multispine_synapses = multispine_synapses[["component_id", "spine_component_count"]]
     multispine_synapses["root_id"] = root_id
+
+    if VERBOSE:
+        print("Saving components...")
     put_dataframe(
         multispine_synapses,
         cloud_path / f"components/{root_id}_multispine_synapses.csv.gz",
@@ -203,37 +215,27 @@ def run_prediction_for_root(root_id):
     timings["component_label_time"] = component_label_time
     timings["raw_n_vertices"] = raw_n_vertices
     timings["processed_n_vertices"] = processed_n_vertices
-    timings["replicas"] = REPLICAS
+    try:
+        replicas = get_replicas_on_node()
+        print("Found replicas:", replicas)
+    except Exception as e:
+        print("Could not find replicas, using default:", REPLICAS)
+        print(e)
+        replicas = REPLICAS
+    timings["replicas"] = replicas
     timings["n_jobs"] = N_JOBS
     timings["timestamp"] = time.time()
 
+    if VERBOSE:
+        print("Saving timings...")
     if cf.exists(f"timings/{root_id}_timings.json"):
         cf.delete(f"timings/{root_id}_timings.json")
     cf.put_json(f"timings/{root_id}_timings.json", timings, cache_control="no-cache")
 
-    # if generate_plot:
-    #     from meshrep.colors import color_weights, predict_proba_colors
-    #     pv.set_jupyter_backend("html")
-    #     posteriors = model.predict_proba(np.log(hks))
-    #     plotter = pv.Plotter()
-    #     plotter.add_mesh(
-    #         pv.make_tri_mesh(*mesh), scalars=color_weights(model, posteriors), rgb=True
-    #     )
-    #     plotter.add_points(
-    #         synapses[
-    #             ["mesh_pt_position_x", "mesh_pt_position_y", "mesh_pt_position_z"]
-    #         ].values,
-    #         scalars=predict_proba_colors(model, np.log(hks_by_synapse)),
-    #         point_size=10,
-    #         rgb=True,
-    #     )
-    #     # TODO
-
 
 # %%
-
-TEST = True
-if TEST:
+TEST = False
+if TEST and not RUN:
     root_id = 864691136237725199
     run_prediction_for_root(root_id)
 
@@ -243,60 +245,26 @@ if TEST:
             df = pd.read_csv(f, **kwargs)
         return df
 
+    print("reading predictions")
     back_predictions = load_dataframe(
         cf, f"predictions/{root_id}_synapse_predictions.csv.gz", compression="gzip"
     )
 
+    print("reading components")
     back_components = load_dataframe(
         cf, f"components/{root_id}_multispine_synapses.csv.gz", compression="gzip"
     )
 
-# %%
-
-
-vCPU_spot_price = 0.00668  # in dollars
-memory_spot_price = 0.000898  # in dollars
-# currently using c2d-standard-32 which has 32 vCPUs and 128 GB of memory
-total_spot_rate = 32 * vCPU_spot_price + 128 * memory_spot_price  # in dollars per hour
-# let's say i can use c2d-highcpu-32 which has 32 vCPUs and 64 GB of memory
-# total_spot_rate = 32 * vCPU_spot_price + 64 * memory_spot_price # in dollars per hour
-
-TIMING = False
-if TIMING:
-    timing_rows = []
-    # for file in cf.list("timings"):
-    paths = list(cf.list("timings"))
-    timing_rows = cf.get_json(paths)
-    timing_df = pd.DataFrame(timing_rows)
-    timing_df["timestamp"] = timing_df["timestamp"].apply(
-        lambda x: datetime.datetime.fromtimestamp(x) if not pd.isnull(x) else x
-    )
-
-    timing_cols = [
-        col for col in timing_df.columns if "time" in col and "timestamp" not in col
-    ]
-    timing_df["total"] = timing_df[timing_cols].sum(axis=1)
-    timing_df["total_effective"] = timing_df["total"] / timing_df["replicas"]
-    relevant_timing_df = timing_df.query("replicas == 32")
-    mean_seconds_per_root = relevant_timing_df["total_effective"].mean()
-    # price_per_hour = 0.5997 * 0.25
-    # https://cloud.google.com/compute/all-pricing#compute-optimized_machine_types
-    # price_per_hour = 1.4527 * 0.25
-    price_per_hour = total_spot_rate
-    neurons_per_hour = 3600 / mean_seconds_per_root
-    price_per_root = price_per_hour / neurons_per_hour
-    n_roots = 100_000
-    total_projected_price = n_roots * price_per_root
-    total_projected_price
-
+    print("done")
 
 # %%
 tq = TaskQueue(f"https://sqs.us-west-2.amazonaws.com/629034007606/{QUEUE_NAME}")
 
 # %%
-REQUEST = True
+
+REQUEST = False
 if REQUEST:
-    n_roots = "unfinished"
+    n_roots = "all"
     # tq.purge()
     types_table = client.materialize.query_table(
         "allen_v1_column_types_slanted_ref",
@@ -333,6 +301,16 @@ def stop_fn(elapsed_time):
 
 
 lease_seconds = 2 * 3600
-RUN = True
+
 if RUN:
     tq.poll(lease_seconds=lease_seconds, verbose=False, tally=False)
+
+# %%
+from time import sleep
+
+while True:
+    print(len(list(cf.list("predictions"))))
+    sleep(20)
+
+# %%
+
