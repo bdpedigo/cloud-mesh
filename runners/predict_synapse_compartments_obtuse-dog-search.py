@@ -136,6 +136,7 @@ def run_prediction_for_root(root_id):
 
     hks, timings = chunked_hks_pipeline(
         mesh,
+        mesh_indices=synapses["mesh_index"],
         return_timing=True,
         verbose=VERBOSE,
         n_jobs=N_JOBS,
@@ -157,9 +158,6 @@ def run_prediction_for_root(root_id):
     max_posteriors = posteriors[np.arange(len(posteriors)), max_inds]
     predictions_df["pred_label_posterior"] = max_posteriors
 
-    # put_dataframe(
-    #     predictions_df, cf, f"predictions/{root_id}_synapse_predictions.csv.gz"
-    # )
     if VERBOSE: 
         print("Saving predictions...")
     put_dataframe(
@@ -193,20 +191,6 @@ def run_prediction_for_root(root_id):
     )
     component_label_time = time.time() - currtime
 
-    # timings = {
-    #     "root_id": root_id,
-    #     "pull_mesh_time": pull_mesh_time,
-    #     "preprocess_time": preprocess_time,
-    #     "split_time": split_time,
-    #     "hks_time": hks_time,
-    #     "pull_synapses_time": pull_synapses_time,
-    #     "predict_time": predict_time,
-    #     "raw_n_vertices": raw_n_vertices,
-    #     "processed_n_vertices": processed_n_vertices,
-    #     "replicas": REPLICAS,
-    #     "timestamp": time.time(),
-    # }
-
     timings["root_id"] = root_id
     timings["pull_mesh_time"] = pull_mesh_time
     timings["simplify_time"] = simplify_time
@@ -215,13 +199,13 @@ def run_prediction_for_root(root_id):
     timings["component_label_time"] = component_label_time
     timings["raw_n_vertices"] = raw_n_vertices
     timings["processed_n_vertices"] = processed_n_vertices
-    try:
-        replicas = get_replicas_on_node()
-        print("Found replicas:", replicas)
-    except Exception as e:
-        print("Could not find replicas, using default:", REPLICAS)
-        print(e)
-        replicas = REPLICAS
+    # try:
+    #     replicas = get_replicas_on_node()
+    #     print("Found replicas:", replicas)
+    # except Exception as e:
+    #     print("Could not find replicas, using default:", REPLICAS)
+    #     print(e)
+    replicas = REPLICAS
     timings["replicas"] = replicas
     timings["n_jobs"] = N_JOBS
     timings["timestamp"] = time.time()
@@ -304,13 +288,4 @@ lease_seconds = 2 * 3600
 
 if RUN:
     tq.poll(lease_seconds=lease_seconds, verbose=False, tally=False)
-
-# %%
-from time import sleep
-
-while True:
-    print(len(list(cf.list("predictions"))))
-    sleep(20)
-
-# %%
 
