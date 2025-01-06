@@ -61,7 +61,7 @@ cloud_folder = f"gs://allen-minnie-phase3/ben-ssa/{MODEL_NAME}"
 cloud_path = Path(cloud_folder)
 cf = CloudFiles(f"gs://allen-minnie-phase3/ben-ssa/{MODEL_NAME}")
 
-set_session_defaults(max_retries=5, backoff_factor=0.5)
+set_session_defaults(max_retries=5, backoff_factor=0.5, pool_maxsize=20)
 client = CAVEclient("minnie65_phase3_v1", version=VERSION)
 cv = client.info.segmentation_cloudvolume(progress=False)
 
@@ -485,18 +485,20 @@ def run_prediction_for_root(root_id):
     info["n_jobs"] = N_JOBS
     info["timestamp"] = time.time()
 
-    if VERBOSE:
-        print("Saving timings...")
-    if cf.exists(f"timings/{root_id}_timings.json"):
-        cf.delete(f"timings/{root_id}_timings.json")
-    cf.put_json(f"timings/{root_id}_timings.json", info, cache_control="no-cache")
-
+    currtime = time.time()
     try:
         url = render_root(root_id, synapses)
         info["url"] = url
     except Exception as e:
         print(e)
         info["url"] = None
+    info["render_time"] = time.time() - currtime
+
+    if VERBOSE:
+        print("Saving timings...")
+    if cf.exists(f"timings/{root_id}_timings.json"):
+        cf.delete(f"timings/{root_id}_timings.json")
+    cf.put_json(f"timings/{root_id}_timings.json", info, cache_control="no-cache")
 
     return info
 
@@ -530,8 +532,8 @@ tq = TaskQueue(f"https://sqs.us-west-2.amazonaws.com/629034007606/{QUEUE_NAME}")
 
 # %%
 
-REQUEST = True
-if REQUEST:
+REQUEST = False
+if REQUEST and not RUN:
     n_roots = "all"
     # tq.purge()
     types_table = client.materialize.query_table(

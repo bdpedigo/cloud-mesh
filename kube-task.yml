@@ -5,7 +5,7 @@ metadata:
     run: cloud-mesh
   name: cloud-mesh
 spec:
-  replicas: 32 # number of pods to run
+  replicas: 0 # number of pods to run
   selector:
     matchLabels:
       run: cloud-mesh
@@ -20,12 +20,12 @@ spec:
         run: cloud-mesh # metadata label attached to pod
     spec:
       containers:
-        - image: bdpedigo/cloud-mesh:v11 # image to pull from dockerhub
+        - image: bdpedigo/cloud-mesh:v13 # image to pull from dockerhub
           name: cloud-mesh # name of container in pod
           imagePullPolicy: Always
           command: ["/bin/sh"]
           # runners/predict_synapse_compartments_2024-11-07.py
-          args: ["-c", "while true; do uv run runners/predict_synapse_compartments_obtuse-dog-search.py; done"]
+          args: ["-c", "while true; do uv run runners/predict_synapse_compartments_another-osprey-repeat.py; done"]
           env:
             - name: CLOUDSDK_CORE_PROJECT
               value: ${CLOUDSDK_CORE_PROJECT}

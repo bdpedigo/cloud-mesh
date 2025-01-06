@@ -39,4 +39,4 @@ ENV PATH="/app/.venv/bin:$PATH"
 ENV RUN_JOBS='True'
 ENV TEST_RUN='False'
 
-CMD ["uv", "run", "runners/predict_synapse_compartments_obtuse-dog-search.py"]
+CMD ["uv", "run", "runners/predict_synapse_compartments_another-osprey-repeat.py"]

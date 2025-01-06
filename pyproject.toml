@@ -7,14 +7,15 @@ dependencies = [
     "fast-simplification>=0.1.7",
     "joblib>=1.4.2",
     "meshmash",
+    "nglui>=3.7.2",
     "pymeshfix>=0.17.0",
-    "scikit-learn>=1.5.2",
+    "scikit-learn==1.6.0",
     "task-queue>=2.14.0",
     "toml>=0.10.2",
 ]
 name = "cloud-mesh"
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.12,<3.13"
 version = "0.1.0"
 
 [tool.uv.sources]
