@@ -20,7 +20,7 @@ gcloud container --project "exalted-beanbag-334502" clusters create "cloud-mesh"
     --machine-type "c2d-highmem-32" \
     --image-type "COS_CONTAINERD" \
     --disk-type "pd-standard" \
-    --disk-size "400" \
+    --disk-size "600" \
     --metadata disable-legacy-endpoints=true \
     --scopes "https://www.googleapis.com/auth/devstorage.read_only","https://www.googleapis.com/auth/logging.write","https://www.googleapis.com/auth/monitoring","https://www.googleapis.com/auth/servicecontrol","https://www.googleapis.com/auth/service.management.readonly","https://www.googleapis.com/auth/trace.append" \
     --preemptible \
@@ -36,6 +36,7 @@ gcloud container --project "exalted-beanbag-334502" clusters create "cloud-mesh"
     --enable-autoupgrade \
     --enable-autorepair \
     --max-unavailable-upgrade 0 \
+    --max-pods-per-node "256" \
     --enable-shielded-nodes \
     --node-locations "us-west1-b"
 
