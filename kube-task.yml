@@ -5,7 +5,7 @@ metadata:
     run: cloud-mesh
   name: cloud-mesh
 spec:
-  replicas: 16 # number of pods to run
+  replicas: 128 # number of pods to run
   selector:
     matchLabels:
       run: cloud-mesh
@@ -20,7 +20,7 @@ spec:
         run: cloud-mesh # metadata label attached to pod
     spec:
       containers:
-        - image: bdpedigo/cloud-mesh:v14 # image to pull from dockerhub
+        - image: bdpedigo/cloud-mesh:v15 # image to pull from dockerhub
           name: cloud-mesh # name of container in pod
           imagePullPolicy: Always
           command: ["/bin/sh"]
@@ -32,9 +32,9 @@ spec:
             - name: GOOGLE_APPLICATION_CREDENTIALS
               value: "/root/.cloudvolume/secrets/google-secret.json" #TODO
             - name: VERBOSE
-              value: "1"
+              value: "0"
             - name: REPLICAS
-              value: "32"
+              value: "128"
             - name: OPENBLAS_NUM_THREADS
               value: "1"
             - name: MKL_NUM_THREADS
@@ -47,14 +47,20 @@ spec:
               value: "ben-skedit"
             - name: RUN
               value: "true"
+            - name: SAVE_LINK
+              value: "false"
           resources:
             requests:
               memory: 4.0Gi
-              cpu: "900m"
-              ephemeral-storage: "4Gi"
+              cpu: "800m"
+              ephemeral-storage: "8Gi"
               # storage: "1Gi"
             limits:
               memory: 32.0Gi
+              ephemeral-storage: "8Gi"
+              cpu: "900m"
+              
+              # cpu: "925m"
               # storage: "8Gi"
               # ephemeral-storage: "8Gi"
           volumeMounts:

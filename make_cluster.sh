@@ -13,7 +13,7 @@ gcloud config set project exalted-beanbag-334502
 # num-nodes: The number of nodes to be created in each of the cluster's zones.
 # --machine-type "c2d-standard-32" \
 # gcloud container --project "exalted-beanbag-334502" clusters delete "cloud-mesh" --zone "us-west1-b"
-gcloud container --project "exalted-beanbag-334502" clusters create "cloud-mesh" \
+gcloud container --project "exalted-beanbag-334502" clusters create "cloud-mesh-32x1" \
     --zone "us-west1-b" \
     --no-enable-basic-auth \
     --release-channel "stable" \
@@ -40,7 +40,7 @@ gcloud container --project "exalted-beanbag-334502" clusters create "cloud-mesh"
     --enable-shielded-nodes \
     --node-locations "us-west1-b"
 
-gcloud container clusters get-credentials --zone us-west1-b cloud-mesh
+gcloud container clusters get-credentials --zone us-west1-b cloud-mesh-32x1
 
 # https://kubernetes.io/docs/concepts/configuration/secret/
 kubectl create secret generic secrets \

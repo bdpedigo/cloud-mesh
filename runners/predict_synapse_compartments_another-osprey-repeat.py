@@ -1,4 +1,8 @@
 # %%
+import urllib3
+
+urllib3.disable_warnings()
+
 import os
 import time
 from functools import partial
@@ -45,6 +49,7 @@ def replace_none(parameters):
 
 
 RUN = os.getenv("RUN", "true").lower() == "true"
+SAVE_LINK = os.getenv("SAVE_LINK", "false").lower() == "true"
 QUEUE_NAME = os.getenv("QUEUE_NAME", "ben-skedit")
 REPLICAS = int(os.environ.get("REPLICAS", 1))
 N_JOBS = 1 if REPLICAS > 1 else -1
@@ -485,14 +490,15 @@ def run_prediction_for_root(root_id):
     info["n_jobs"] = N_JOBS
     info["timestamp"] = time.time()
 
-    currtime = time.time()
-    try:
-        url = render_root(root_id, synapses)
-        info["url"] = url
-    except Exception as e:
-        print(e)
-        info["url"] = None
-    info["render_time"] = time.time() - currtime
+    if SAVE_LINK:
+        currtime = time.time()
+        try:
+            url = render_root(root_id, synapses)
+            info["url"] = url
+        except Exception as e:
+            print(e)
+            info["url"] = None
+        info["render_time"] = time.time() - currtime
 
     if VERBOSE:
         print("Saving timings...")
@@ -560,6 +566,12 @@ if REQUEST and not RUN:
         root_ids = types_table.sample(n_roots, weights=weights)["pt_root_id"].tolist()
     tasks = [partial(run_prediction_for_root, root_id) for root_id in root_ids]
     tq.insert(tasks)
+
+# %%
+# types_table = client.materialize.query_table(
+#     "nucleus_detection_v0",
+#     # "allen_column_mtypes_v2"
+# )
 
 # %%
 
