@@ -1,7 +1,16 @@
 # %%
+import logging
+import warnings
+
 import urllib3
 
 urllib3.disable_warnings()
+
+warnings.filterwarnings("ignore", module="urllib3")
+
+# supress warnings for WARNING:urllib3.connectionpool:Connection pool is full...
+
+logging.getLogger("urllib3").setLevel(logging.CRITICAL)
 
 import os
 import time
@@ -543,10 +552,12 @@ if REQUEST and not RUN:
     n_roots = "all"
     # tq.purge()
     types_table = client.materialize.query_table(
-        "allen_v1_column_types_slanted_ref",
+        "aibs_metamodel_mtypes_v661_v2",
+        # "allen_v1_column_types_slanted_ref",
         # "allen_column_mtypes_v2"
     )
     types_table.query("pt_root_id != 0", inplace=True)
+    types_table.drop_duplicates("pt_root_id", inplace=True)
     if n_roots == "all":
         root_ids = types_table["pt_root_id"].tolist()
     elif n_roots == "unfinished":
@@ -567,11 +578,6 @@ if REQUEST and not RUN:
     tasks = [partial(run_prediction_for_root, root_id) for root_id in root_ids]
     tq.insert(tasks)
 
-# %%
-# types_table = client.materialize.query_table(
-#     "nucleus_detection_v0",
-#     # "allen_column_mtypes_v2"
-# )
 
 # %%
 
