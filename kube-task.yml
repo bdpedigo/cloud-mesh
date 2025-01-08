@@ -5,7 +5,7 @@ metadata:
     run: cloud-mesh
   name: cloud-mesh
 spec:
-  replicas: 256 # number of pods to run
+  replicas: 1024 # number of pods to run
   selector:
     matchLabels:
       run: cloud-mesh
@@ -34,7 +34,7 @@ spec:
             - name: VERBOSE
               value: "0"
             - name: REPLICAS
-              value: "256"
+              value: "1024"
             - name: OPENBLAS_NUM_THREADS
               value: "1"
             - name: MKL_NUM_THREADS
@@ -51,14 +51,14 @@ spec:
               value: "false"
           resources:
             requests:
-              memory: 4.0Gi
-              cpu: "800m"
+              memory: 3.0Gi
+              cpu: "700m"
               ephemeral-storage: "8Gi"
               # storage: "1Gi"
             limits:
               memory: 32.0Gi
               ephemeral-storage: "8Gi"
-              cpu: "900m"
+              cpu: "800m"
               
               # cpu: "925m"
               # storage: "8Gi"
