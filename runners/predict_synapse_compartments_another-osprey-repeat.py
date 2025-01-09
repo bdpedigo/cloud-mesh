@@ -143,16 +143,32 @@ def load_model(model_name):
 
 
 def compute_distance_to_nucleus(points, root_id):
-    nuc_table = client.materialize.query_table(
-        "nucleus_detection_v0",
+    nuc_table = client.materialize.query_view(
+        "nucleus_detection_lookup_v1",
         filter_equal_dict={"pt_root_id": root_id},
         split_positions=True,
         desired_resolution=[1, 1, 1],
     )
+    if len(nuc_table) > 1:  # find correct nucleus, hopefully one is a neuron
+        cell_table = client.materialize.query_table(
+            "aibs_metamodel_mtypes_v661_v2",
+            filter_in_dict={"target_id": nuc_table["id"].values},
+        )
+        if len(cell_table) == 1:
+            neuron_nuc_id = cell_table["id_ref"].values[0]
+            nuc_table = nuc_table.set_index("id").loc[neuron_nuc_id]
+        else:
+            raise ValueError(f"Found more than one neuron nucleus for root {root_id}")
+    elif len(nuc_table) == 0:
+        raise ValueError(f"Found no nucleus for root {root_id}")
+    else:
+        pass  # has one nucleus
 
     nuc_coords = nuc_table[["pt_position_x", "pt_position_y", "pt_position_z"]].values
+
     if nuc_coords.shape != (1, 3):
-        raise ValueError(f"nuc_coords shape is {nuc_coords.shape}")
+        raise ValueError(f"Error finding nucleus for root {root_id}")
+
     distances = np.linalg.norm(points - nuc_coords, axis=1)
     return distances
 
@@ -386,6 +402,26 @@ def run_prediction_for_root(root_id):
     info["pull_synapses_time"] = time.time() - currtime
 
     currtime = time.time()
+    aux_X = []
+    aux_X_features = []
+    component_sizes = component_size_transform(mesh, np.arange(len(mesh[0])))
+    aux_X.append(component_sizes)
+    aux_X_features.append("component_size")
+
+    mass = compute_mass(mesh, np.arange(len(mesh[0])))
+    aux_X.append(mass)
+    aux_X_features.append("mass")
+
+    distances_to_nuc = compute_distance_to_nucleus(mesh[0], root_id)
+    aux_X.append(distances_to_nuc)
+    aux_X_features.append("distance_to_nucleus")
+
+    aux_X = np.column_stack(aux_X)
+    aux_X_df = pd.DataFrame(aux_X, columns=aux_X_features)
+
+    info["aux_features_time"] = time.time() - currtime
+
+    currtime = time.time()
     if VERBOSE:
         print("Splitting mesh...")
     stitcher = MeshStitcher(mesh, n_jobs=N_JOBS, verbose=VERBOSE)
@@ -406,26 +442,6 @@ def run_prediction_for_root(root_id):
     info["hks_time"] = time.time() - currtime
 
     X_df = pd.DataFrame(X, columns=[f"hks_{i}" for i in range(X.shape[1])])
-
-    currtime = time.time()
-    aux_X = []
-    aux_X_features = []
-    component_sizes = component_size_transform(mesh, np.arange(len(mesh[0])))
-    aux_X.append(component_sizes)
-    aux_X_features.append("component_size")
-
-    mass = compute_mass(mesh, np.arange(len(mesh[0])))
-    aux_X.append(mass)
-    aux_X_features.append("mass")
-
-    distances_to_nuc = compute_distance_to_nucleus(mesh[0], root_id)
-    aux_X.append(distances_to_nuc)
-    aux_X_features.append("distance_to_nucleus")
-
-    aux_X = np.column_stack(aux_X)
-    aux_X_df = pd.DataFrame(aux_X, columns=aux_X_features)
-
-    info["aux_features_time"] = time.time() - currtime
 
     X_df = pd.concat([X_df, aux_X_df], axis=1)
     X_df = X_df[feature_columns]
@@ -548,14 +564,16 @@ tq = TaskQueue(f"https://sqs.us-west-2.amazonaws.com/629034007606/{QUEUE_NAME}")
 # %%
 
 REQUEST = False
-if REQUEST and not RUN:
-    n_roots = "all"
+# if REQUEST and not RUN:
+if True:
+    n_roots = "unfinished"
     # tq.purge()
     types_table = client.materialize.query_table(
         "aibs_metamodel_mtypes_v661_v2",
         # "allen_v1_column_types_slanted_ref",
         # "allen_column_mtypes_v2"
     )
+
     types_table.query("pt_root_id != 0", inplace=True)
     types_table.drop_duplicates("pt_root_id", inplace=True)
     if n_roots == "all":
@@ -576,8 +594,113 @@ if REQUEST and not RUN:
         weights = types_table["cell_type"].map(props)
         root_ids = types_table.sample(n_roots, weights=weights)["pt_root_id"].tolist()
     tasks = [partial(run_prediction_for_root, root_id) for root_id in root_ids]
-    tq.insert(tasks)
+    # tq.insert(tasks)
 
+# %%
+# types_table = client.materialize.query_table(
+#     "aibs_metamodel_mtypes_v661_v2",
+# )
+# query_roots = types_table
+# query_ids = query_roots["id_ref"].values
+# alt_points = client.materialize.query_table("nucleus_alternative_points")
+# id_to_root_map = alt_points.set_index("id_ref").loc[query_ids]["pt_root_id"]
+# roots_to_add = id_to_root_map.values
+# len(roots_to_add)
+
+# %%
+
+# get set of things that were predicted neuron
+types_table = client.materialize.query_table(
+    "aibs_metamodel_mtypes_v661_v2",
+)
+
+# find the corresponding nucleus IDs from that table
+query_ids = types_table["id_ref"].values
+
+# look these up in the lookup view to get the correct root IDs
+nuc_table = client.materialize.query_view("nucleus_detection_lookup_v1")
+nuc_table.query("pt_root_id != 0", inplace=True)
+# neuron_nuc_ids = nuc_table.query("id.isin(@query_ids)")["id"].values
+
+# find all root IDs associated with these nucleus IDs
+roots = nuc_table.query("id.isin(@query_ids)")["pt_root_id"]
+
+# not all of these were those from types_table
+print(roots.isin(types_table["pt_root_id"]).all())
+
+# and some of these are associated with more than one thing in the nuc_table
+root_counts = nuc_table.query("pt_root_id.isin(@roots)")["pt_root_id"].value_counts()
+dup_roots = root_counts[root_counts > 1].index
+
+# %%
+no_neurons = 0
+for root_id in dup_roots:
+    nuc_table = client.materialize.query_view(
+        "nucleus_detection_lookup_v1",
+        filter_equal_dict={"pt_root_id": root_id},
+        split_positions=True,
+        desired_resolution=[1, 1, 1],
+    )
+    if len(nuc_table) > 1:
+        cell_table = client.materialize.query_table(
+            "aibs_metamodel_mtypes_v661_v2",
+            filter_in_dict={"target_id": nuc_table["id"].values},
+            # filter_in_dict={"pt_root_id": nuc_table["orig_root_id"].unique()},
+        )
+        if len(cell_table) == 1:
+            neuron_nuc_id = cell_table["id_ref"].values[0]
+            nuc_table = nuc_table.set_index("id").loc[neuron_nuc_id]
+            nuc_coords = nuc_table[
+                ["pt_position_x", "pt_position_y", "pt_position_z"]
+            ].values
+            print("found position")
+        else:
+            print(len(cell_table))
+            no_neurons += 1
+            continue
+
+    else:
+        nuc_coords = np.nan
+
+
+# %%
+counts = nuc_table["pt_root_id"].value_counts()
+multi_soma_roots = counts[counts > 1].index
+
+# %%
+done_files = list(cf.list("predictions"))
+processed_roots = np.array(
+    [int(file.split("_")[0].split("/")[1]) for file in done_files]
+)
+print(len(processed_roots))
+missing_root_ids = np.setdiff1d(root_ids, processed_roots)
+print(len(missing_root_ids))
+
+
+# %%
+
+
+def compute_distance_to_nucleus(points, root_id):
+    nuc_table = client.materialize.query_view(
+        "nucleus_detection_lookup_v1",
+        filter_equal_dict={"pt_root_id": root_id},
+        split_positions=True,
+        desired_resolution=[1, 1, 1],
+    )
+
+    nuc_coords = nuc_table[["pt_position_x", "pt_position_y", "pt_position_z"]].values
+    if nuc_coords.shape != (1, 3):
+        raise ValueError(f"nuc_coords shape is {nuc_coords.shape}")
+    distances = np.linalg.norm(points - nuc_coords, axis=1)
+    return distances
+
+
+root_id = missing_root_ids[0]
+syn_df = client.materialize.synapse_query(
+    post_ids=root_id, desired_resolution=[1, 1, 1]
+)
+syn_pos = np.vstack(syn_df.ctr_pt_position.values)
+ds = compute_distance_to_nucleus(syn_pos, root_id)
 
 # %%
 
