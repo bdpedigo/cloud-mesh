@@ -549,22 +549,26 @@ tq = TaskQueue(f"https://sqs.us-west-2.amazonaws.com/629034007606/{QUEUE_NAME}")
 # %%
 
 REQUEST = False
-# if REQUEST and not RUN:
-if True:
+if REQUEST and not RUN:
     n_roots = "unfinished"
-    # tq.purge()
+    # get set of things that were predicted neuron
     types_table = client.materialize.query_table(
         "aibs_metamodel_mtypes_v661_v2",
-        # "allen_v1_column_types_slanted_ref",
-        # "allen_column_mtypes_v2"
     )
+    print("len(types_table)", len(types_table))
 
-    types_table.query("pt_root_id != 0", inplace=True)
-    types_table.drop_duplicates("pt_root_id", inplace=True)
+    # find the corresponding nucleus IDs from that table
+    query_ids = types_table["id_ref"].values
+
+    # look these up in the lookup view to get the correct root IDs
+    nuc_table = client.materialize.query_view("nucleus_detection_lookup_v1")
+    nuc_table.query("pt_root_id != 0", inplace=True)
+
+    # find all root IDs associated with these nucleus IDs
+    root_ids = nuc_table.query("id.isin(@query_ids)")["pt_root_id"].unique()
     if n_roots == "all":
-        root_ids = types_table["pt_root_id"].tolist()
+        pass
     elif n_roots == "unfinished":
-        root_ids = types_table["pt_root_id"].tolist()
         print(len(root_ids))
         done_files = list(cf.list("predictions"))
         processed_roots = np.array(
@@ -573,108 +577,8 @@ if True:
         print(len(processed_roots))
         root_ids = np.setdiff1d(root_ids, processed_roots)
         print(len(root_ids))
-    else:
-        counts = types_table["cell_type"].value_counts()
-        props = counts / counts.sum()
-        weights = types_table["cell_type"].map(props)
-        root_ids = types_table.sample(n_roots, weights=weights)["pt_root_id"].tolist()
     tasks = [partial(run_prediction_for_root, root_id) for root_id in root_ids]
-    # tq.insert(tasks)
-
-# %%
-
-# get set of things that were predicted neuron
-types_table = client.materialize.query_table(
-    "aibs_metamodel_mtypes_v661_v2",
-)
-
-# find the corresponding nucleus IDs from that table
-query_ids = types_table["id_ref"].values
-
-# look these up in the lookup view to get the correct root IDs
-nuc_table = client.materialize.query_view("nucleus_detection_lookup_v1")
-nuc_table.query("pt_root_id != 0", inplace=True)
-# neuron_nuc_ids = nuc_table.query("id.isin(@query_ids)")["id"].values
-
-# find all root IDs associated with these nucleus IDs
-roots = nuc_table.query("id.isin(@query_ids)")["pt_root_id"]
-
-# not all of these were those from types_table
-print(roots.isin(types_table["pt_root_id"]).all())
-
-# and some of these are associated with more than one thing in the nuc_table
-root_counts = nuc_table.query("pt_root_id.isin(@roots)")["pt_root_id"].value_counts()
-dup_roots = root_counts[root_counts > 1].index
-
-# %%
-no_neurons = 0
-for root_id in dup_roots:
-    nuc_table = client.materialize.query_view(
-        "nucleus_detection_lookup_v1",
-        filter_equal_dict={"pt_root_id": root_id},
-        split_positions=True,
-        desired_resolution=[1, 1, 1],
-    )
-    if len(nuc_table) > 1:
-        cell_table = client.materialize.query_table(
-            "aibs_metamodel_mtypes_v661_v2",
-            filter_in_dict={"target_id": nuc_table["id"].values},
-            # filter_in_dict={"pt_root_id": nuc_table["orig_root_id"].unique()},
-        )
-        if len(cell_table) == 1:
-            neuron_nuc_id = cell_table["id_ref"].values[0]
-            nuc_table = nuc_table.set_index("id").loc[neuron_nuc_id]
-            nuc_coords = nuc_table[
-                ["pt_position_x", "pt_position_y", "pt_position_z"]
-            ].values
-            print("found position")
-        else:
-            print(len(cell_table))
-            no_neurons += 1
-            continue
-
-    else:
-        nuc_coords = np.nan
-
-
-# %%
-counts = nuc_table["pt_root_id"].value_counts()
-multi_soma_roots = counts[counts > 1].index
-
-# %%
-done_files = list(cf.list("predictions"))
-processed_roots = np.array(
-    [int(file.split("_")[0].split("/")[1]) for file in done_files]
-)
-print(len(processed_roots))
-missing_root_ids = np.setdiff1d(root_ids, processed_roots)
-print(len(missing_root_ids))
-
-
-# %%
-
-
-def compute_distance_to_nucleus(points, root_id):
-    nuc_table = client.materialize.query_view(
-        "nucleus_detection_lookup_v1",
-        filter_equal_dict={"pt_root_id": root_id},
-        split_positions=True,
-        desired_resolution=[1, 1, 1],
-    )
-
-    nuc_coords = nuc_table[["pt_position_x", "pt_position_y", "pt_position_z"]].values
-    if nuc_coords.shape != (1, 3):
-        raise ValueError(f"nuc_coords shape is {nuc_coords.shape}")
-    distances = np.linalg.norm(points - nuc_coords, axis=1)
-    return distances
-
-
-root_id = missing_root_ids[0]
-syn_df = client.materialize.synapse_query(
-    post_ids=root_id, desired_resolution=[1, 1, 1]
-)
-syn_pos = np.vstack(syn_df.ctr_pt_position.values)
-ds = compute_distance_to_nucleus(syn_pos, root_id)
+    tq.insert(tasks)
 
 # %%
 
@@ -689,5 +593,3 @@ lease_seconds = 2 * 3600
 
 if RUN:
     tq.poll(lease_seconds=lease_seconds, verbose=False, tally=False)
-
-# %%
