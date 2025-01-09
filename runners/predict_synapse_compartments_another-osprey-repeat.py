@@ -448,15 +448,6 @@ def run_prediction_for_root(root_id):
 
     transformed_X = transform(X_df)
 
-    # hks, timings = chunked_hks_pipeline(
-    #     mesh,
-    #     mesh_indices=synapses["mesh_index"],
-    #     return_timing=True,
-    #     verbose=VERBOSE,
-    #     n_jobs=N_JOBS,
-    #     **parameters["chunked_hks_pipeline"],
-    # )
-
     if VERBOSE:
         print("Computing predictions...")
     currtime = time.time()
@@ -504,12 +495,6 @@ def run_prediction_for_root(root_id):
     )
     info["component_label_time"] = time.time() - currtime
 
-    # try:
-    #     replicas = get_replicas_on_node()
-    #     print("Found replicas:", replicas)
-    # except Exception as e:
-    #     print("Could not find replicas, using default:", REPLICAS)
-    #     print(e)
     replicas = REPLICAS
     info["replicas"] = replicas
     info["n_jobs"] = N_JOBS
@@ -595,17 +580,6 @@ if True:
         root_ids = types_table.sample(n_roots, weights=weights)["pt_root_id"].tolist()
     tasks = [partial(run_prediction_for_root, root_id) for root_id in root_ids]
     # tq.insert(tasks)
-
-# %%
-# types_table = client.materialize.query_table(
-#     "aibs_metamodel_mtypes_v661_v2",
-# )
-# query_roots = types_table
-# query_ids = query_roots["id_ref"].values
-# alt_points = client.materialize.query_table("nucleus_alternative_points")
-# id_to_root_map = alt_points.set_index("id_ref").loc[query_ids]["pt_root_id"]
-# roots_to_add = id_to_root_map.values
-# len(roots_to_add)
 
 # %%
 
