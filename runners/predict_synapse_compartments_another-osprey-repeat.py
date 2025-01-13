@@ -156,7 +156,7 @@ def compute_distance_to_nucleus(points, root_id):
         )
         if len(cell_table) == 1:
             neuron_nuc_id = cell_table["id_ref"].values[0]
-            nuc_table = nuc_table.set_index("id").loc[neuron_nuc_id]
+            nuc_table = nuc_table.set_index("id").loc[[neuron_nuc_id]]
         else:
             raise ValueError(f"Found more than one neuron nucleus for root {root_id}")
     elif len(nuc_table) == 0:
@@ -549,12 +549,16 @@ tq = TaskQueue(f"https://sqs.us-west-2.amazonaws.com/629034007606/{QUEUE_NAME}")
 # %%
 
 REQUEST = False
-if REQUEST and not RUN:
+# if REQUEST and not RUN:
+if True:
     n_roots = "unfinished"
     # get set of things that were predicted neuron
     types_table = client.materialize.query_table(
         "aibs_metamodel_mtypes_v661_v2",
     )
+    counts = types_table['pt_root_id'].value_counts()
+    dups = (counts[counts > 1]).drop(0)
+    types_table.query('~(pt_root_id in @dups.index)', inplace=True)
     print("len(types_table)", len(types_table))
 
     # find the corresponding nucleus IDs from that table
@@ -579,6 +583,7 @@ if REQUEST and not RUN:
         print(len(root_ids))
     tasks = [partial(run_prediction_for_root, root_id) for root_id in root_ids]
     tq.insert(tasks)
+
 
 # %%
 
