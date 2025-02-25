@@ -5,7 +5,7 @@ metadata:
     run: cloud-mesh
   name: cloud-mesh
 spec:
-  replicas: 128 # number of pods to run
+  replicas: 8 # number of pods to run
   selector:
     matchLabels:
       run: cloud-mesh
@@ -20,21 +20,21 @@ spec:
         run: cloud-mesh # metadata label attached to pod
     spec:
       containers:
-        - image: bdpedigo/cloud-mesh:v18 # image to pull from dockerhub
+        - image: bdpedigo/cloud-mesh:v19 # image to pull from dockerhub
           name: cloud-mesh # name of container in pod
           imagePullPolicy: Always
           command: ["/bin/sh"]
           # runners/predict_synapse_compartments_2024-11-07.py
-          args: ["-c", "while true; do uv run runners/predict_synapse_compartments_another-osprey-repeat.py; done"]
+          args: ["-c", "while true; do uv run runners/extract_features_latest.py; done"]
           env:
             - name: CLOUDSDK_CORE_PROJECT
               value: ${CLOUDSDK_CORE_PROJECT}
             - name: GOOGLE_APPLICATION_CREDENTIALS
               value: "/root/.cloudvolume/secrets/google-secret.json" #TODO
             - name: VERBOSE
-              value: "2"
+              value: "1"
             - name: REPLICAS
-              value: "128"
+              value: "8"
             - name: OPENBLAS_NUM_THREADS
               value: "1"
             - name: MKL_NUM_THREADS

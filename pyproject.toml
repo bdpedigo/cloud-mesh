@@ -8,8 +8,7 @@ dependencies = [
     "joblib>=1.4.2",
     "meshmash",
     "nglui>=3.7.2",
-    "pymeshfix>=0.17.0",
-    "scikit-learn==1.6.0",
+    "scikit-learn==1.6.1",
     "task-queue>=2.14.0",
     "toml>=0.10.2",
 ]
