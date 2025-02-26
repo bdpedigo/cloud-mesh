@@ -39,4 +39,4 @@ ENV PATH="/app/.venv/bin:$PATH"
 ENV RUN_JOBS='True'
 ENV TEST_RUN='False'
 
-CMD ["uv", "run", "runners/extract_features_latest.py"]
+CMD ["uv", "run", "runners/features_latest.py"]

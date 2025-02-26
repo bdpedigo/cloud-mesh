@@ -3,6 +3,7 @@ import json
 import logging
 import os
 import time
+from functools import partial
 from pathlib import Path
 
 import numpy as np
@@ -24,23 +25,29 @@ from meshmash import (
 
 urllib3.disable_warnings()
 
-# supress warnings for WARNING:urllib3.connectionpool:Connection pool is full...
+# suppress warnings for WARNING:urllib3.connectionpool:Connection pool is full...
 
 logging.getLogger("urllib3").setLevel(logging.CRITICAL)
 
-logging.basicConfig(level=logging.ERROR)
+
+MODEL_NAME = os.environ.get("MODEL_NAME", "foggy-forest-call")
+VERBOSE = str(os.environ.get("VERBOSE", False)).lower() == "true"
+N_JOBS = int(os.environ.get("N_JOBS", 1))
+REPLICAS = int(os.environ.get("REPLICAS", 1))
+MATERIALIZATION_VERSION = int(os.environ.get("MATERIALIZATION_VERSION", 1300))
+QUEUE_NAME = os.environ.get("QUEUE_NAME", "ben-skedit")
+RUN = os.environ.get("RUN", True)
+REQUEST = os.environ.get("REQUEST", not RUN)
+LOGGING_LEVEL = os.environ.get("LOGGING_LEVEL", "ERROR")
+LEASE_SECONDS = int(os.environ.get("LEASE_SECONDS", 7200))
+
+logging.basicConfig(level=LOGGING_LEVEL)
+
+logging.getLogger("meshmash").setLevel(level=LOGGING_LEVEL)
 
 # redirect logging to stdout
 logging.getLogger().handlers = []
 logging.getLogger().addHandler(logging.StreamHandler())
-
-MODEL_NAME = os.environ.get("MODEL_NAME", "foggy-forest-call")
-VERBOSE = bool(os.environ.get("VERBOSE", False))
-N_JOBS = bool(os.environ.get("N_JOBS", 1))
-REPLICAS = int(os.environ.get("REPLICAS", 1))
-MATERIALIZATION_VERSION = int(os.environ.get("MATERIALIZATION_VERSION", 1300))
-QUEUE_NAME = os.environ.get("QUEUE_NAME", "ben-skedit")
-LEASE_SECONDS = int(os.environ.get("LEASE_SECONDS", 7200))
 
 url_path = Path("~/.cloudvolume/secrets")
 url_path = url_path / "discord-secret.json"
@@ -91,7 +98,6 @@ non_hks_features = [
 
 @queueable
 def run_for_root(root_id):
-    total_time = time.time()
     try:
         needs_features = True
         needs_edges = True
@@ -185,6 +191,9 @@ def run_for_root(root_id):
             timing_dict["n_condensed_edges"] = result.condensed_edges.shape[0]
             timing_dict["mesh_time"] = mesh_time
             timing_dict["synapse_mapping_time"] = synapse_mapping_time
+            timing_dict["replicas"] = REPLICAS
+            timing_dict["n_jobs"] = N_JOBS
+            timing_dict["timestamp"] = time.time()
 
             cf.put_json(f"timings/{root_id}.json", timing_dict)
             logging.info(f"Saved timings for {root_id}")
@@ -208,6 +217,19 @@ def stop_fn(elapsed_time):
         return True
 
 
-tq.poll(lease_seconds=LEASE_SECONDS, verbose=False, tally=False)
+if RUN:
+    tq.poll(lease_seconds=LEASE_SECONDS, verbose=False, tally=False, stop_fn=stop_fn)
+
+# %%
+if REQUEST:
+    request_table = client.materialize.query_table("allen_v1_column_types_slanted_ref")
+    root_ids = (
+        request_table.query("pt_root_id != 0")
+        .drop_duplicates("pt_root_id", keep=False)["pt_root_id"]
+        .unique()
+    )
+    tasks = [partial(run_for_root, root_id) for root_id in root_ids]
+
+    tq.insert(tasks)
 
 # %%

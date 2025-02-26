@@ -32,6 +32,8 @@ spec:
             - name: GOOGLE_APPLICATION_CREDENTIALS
               value: "/root/.cloudvolume/secrets/google-secret.json" #TODO
             - name: VERBOSE
+              value: "false"
+            - name: N_JOBS
               value: "1"
             - name: REPLICAS
               value: "8"
@@ -47,8 +49,11 @@ spec:
               value: "ben-skedit"
             - name: RUN
               value: "true"
-            - name: SAVE_LINK
-              value: "false"
+            - name: LOGGING_LEVEL
+              value: "ERROR"
+            - name: LEASE_SECONDS
+              value: "7200"
+
           resources:
             requests:
               # memory: "3.0Gi"
