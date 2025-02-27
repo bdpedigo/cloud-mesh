@@ -23,6 +23,7 @@ from meshmash import (
     save_id_to_mesh_map,
 )
 
+
 urllib3.disable_warnings()
 
 # suppress warnings for WARNING:urllib3.connectionpool:Connection pool is full...
@@ -31,12 +32,12 @@ logging.getLogger("urllib3").setLevel(logging.CRITICAL)
 
 
 MODEL_NAME = os.environ.get("MODEL_NAME", "foggy-forest-call")
-VERBOSE = str(os.environ.get("VERBOSE", False)).lower() == "true"
-N_JOBS = int(os.environ.get("N_JOBS", 1))
+VERBOSE = str(os.environ.get("VERBOSE", "True")).lower() == "true"
+N_JOBS = int(os.environ.get("N_JOBS", -2))
 REPLICAS = int(os.environ.get("REPLICAS", 1))
 MATERIALIZATION_VERSION = int(os.environ.get("MATERIALIZATION_VERSION", 1300))
 QUEUE_NAME = os.environ.get("QUEUE_NAME", "ben-skedit")
-RUN = os.environ.get("RUN", True)
+RUN = os.environ.get("RUN", False)
 REQUEST = os.environ.get("REQUEST", not RUN)
 LOGGING_LEVEL = os.environ.get("LOGGING_LEVEL", "ERROR")
 LEASE_SECONDS = int(os.environ.get("LEASE_SECONDS", 7200))
@@ -92,6 +93,18 @@ non_hks_features = [
     "component_n_vertices",
     "distance_to_nucleus",
 ]
+
+# %%
+bad_root = 864691136125099814
+raw_mesh = cv.mesh.get(bad_root, **parameters["cv-mesh-get"])[bad_root]
+raw_mesh = (raw_mesh.vertices, raw_mesh.faces)
+result = chunked_hks_pipeline(
+    raw_mesh,
+    query_indices=None,
+    verbose=VERBOSE,
+    n_jobs=N_JOBS,
+    **parameters["chunked_hks_pipeline"],
+)
 
 # %%
 
@@ -198,10 +211,11 @@ def run_for_root(root_id):
             cf.put_json(f"timings/{root_id}.json", timing_dict)
             logging.info(f"Saved timings for {root_id}")
 
-    except Exception:
+    except Exception as e:
         msg = f"Error processing {root_id}"
-        msg += "\n" + str(Exception)
+        msg += "\n" + str(e)
         logging.error(msg)
+        msg += "\n" + str(e.__traceback__)
         requests.post(URL, json={"content": msg})
 
 
@@ -230,6 +244,29 @@ if REQUEST:
     )
     tasks = [partial(run_for_root, root_id) for root_id in root_ids]
 
-    tq.insert(tasks)
+    # tq.insert(tasks)
+
+# %%
+# TODO add this in
+# lookup = client.materialize.query_view("nucleus_detection_lookup_v1").set_index("id")
+# # %%
+# lookup.loc[request_table["id_ref"]]
+
+dones = list(cf.list("features"))
+dones = [int(d.split(".")[0].split("/")[1]) for d in dones if ".npz" in d]
+
+# %%
+missing_ids = np.setdiff1d(root_ids, dones)
+tasks = [partial(run_for_root, root_id) for root_id in missing_ids]
+# %%
+# tq.insert(tasks)
+
+# %%
+print('here')
+run_for_root(864691136125099814)
+
+#%%
+run_for_root(864691135489514810)
+
 
 # %%
