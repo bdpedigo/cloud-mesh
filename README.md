@@ -6,6 +6,8 @@ To build (from folder above):
 To run:
 `docker run --rm --platform linux/amd64 -v /Users/ben.pedigo/.cloudvolume/secrets:/root/.cloudvolume/secrets cloud-mesh`
 
+`docker run --env RUN=True --rm --platform linux/amd64 -v /Users/ben.pedigo/.cloudvolume/secrets:/root/.cloudvolume/secrets cloud-mesh`
+
 To tag:
 `docker tag cloud-mesh bdpedigo/cloud-mesh:v0`
 

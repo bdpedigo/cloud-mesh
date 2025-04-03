@@ -3,7 +3,7 @@ FROM python:3.12-slim-bookworm
 
 # Install git
 RUN apt update
-RUN apt install -y git
+# RUN apt install -y git
 RUN apt-get update && apt-get install -y build-essential
 
 # Install uv
@@ -39,4 +39,5 @@ ENV PATH="/app/.venv/bin:$PATH"
 ENV RUN_JOBS='True'
 ENV TEST_RUN='False'
 
-CMD ["uv", "run", "runners/features_latest.py"]
+# CMD ["uv", "run", "runners/features_latest.py"]
+CMD ["uv", "run", "runners/approach_comparisons.py"]

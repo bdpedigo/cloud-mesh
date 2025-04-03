@@ -29,13 +29,14 @@ urllib3.disable_warnings()
 logging.getLogger("urllib3").setLevel(logging.CRITICAL)
 
 
-VERBOSE = str(os.environ.get("VERBOSE", "True")).lower() == "true"
-N_JOBS = int(os.environ.get("N_JOBS", -2))
+VERBOSE = str(os.environ.get("VERBOSE", "False")).lower() == "true"
+print("VERBOSE:", VERBOSE)
+N_JOBS = int(os.environ.get("N_JOBS", 1))
 REPLICAS = int(os.environ.get("REPLICAS", 1))
 MATERIALIZATION_VERSION = int(os.environ.get("MATERIALIZATION_VERSION", 1300))
 QUEUE_NAME = os.environ.get("QUEUE_NAME", "ben-skedit")
-RUN = os.environ.get("RUN", False)
-REQUEST = os.environ.get("REQUEST", not RUN)
+RUN = os.environ.get("RUN", True)
+REQUEST = os.environ.get("REQUEST", False)
 LOGGING_LEVEL = os.environ.get("LOGGING_LEVEL", "ERROR")
 LEASE_SECONDS = int(os.environ.get("LEASE_SECONDS", 12 * 3600))
 
@@ -86,6 +87,8 @@ non_hks_features = [
 
 @queueable
 def run_for_root(root_id, model_name):
+    if VERBOSE: 
+        print("Working on root_id:", root_id, "model_name:", model_name)
     model_out_path = base_path / model_name
 
     feature_out_path = base_path / "features"
@@ -214,8 +217,10 @@ root_ids = labels_df["root_id"].unique()
 model_names = ["shiny-wolf-message", "shiny-wolf-message-strawman"]
 if REQUEST:
     tasks = []
-    for model_name in model_names:
-        for root_id in root_ids:
+    for root_id in root_ids:
+        for model_name in model_names:
             tasks.append(partial(run_for_root, root_id, model_name))
 
-    # tq.insert(tasks)
+    tq.insert(tasks)
+
+# %%
