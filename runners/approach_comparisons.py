@@ -38,7 +38,7 @@ QUEUE_NAME = os.environ.get("QUEUE_NAME", "ben-skedit")
 RUN = os.environ.get("RUN", True)
 REQUEST = os.environ.get("REQUEST", False)
 LOGGING_LEVEL = os.environ.get("LOGGING_LEVEL", "ERROR")
-LEASE_SECONDS = int(os.environ.get("LEASE_SECONDS", 12 * 3600))
+LEASE_SECONDS = int(os.environ.get("LEASE_SECONDS", 24 * 3600))
 
 logging.basicConfig(level=LOGGING_LEVEL)
 logging.getLogger("meshmash").setLevel(level=LOGGING_LEVEL)
@@ -87,15 +87,16 @@ non_hks_features = [
 
 @queueable
 def run_for_root(root_id, model_name):
-    if VERBOSE: 
+    if VERBOSE:
         print("Working on root_id:", root_id, "model_name:", model_name)
-    model_out_path = base_path / model_name
 
-    feature_out_path = base_path / "features"
-    edge_out_path = base_path / "edges"
-    synapse_mappings_path = base_path / "synapse-mappings"
+    model_path = base_path / model_name
 
-    cf, _ = interpret_path(model_out_path)
+    feature_out_path = model_path / "features"
+    edge_out_path = model_path / "edges"
+    synapse_mappings_path = model_path / "synapse-mappings"
+
+    cf, _ = interpret_path(base_path)
 
     model_folder = models_folder / model_name
     parameters = toml.load(model_folder / "parameters.toml")
