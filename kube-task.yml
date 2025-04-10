@@ -5,7 +5,7 @@ metadata:
     run: cloud-mesh
   name: cloud-mesh
 spec:
-  replicas: 8 # number of pods to run
+  replicas: 128 # number of pods to run
   selector:
     matchLabels:
       run: cloud-mesh
@@ -20,12 +20,12 @@ spec:
         run: cloud-mesh # metadata label attached to pod
     spec:
       containers:
-        - image: bdpedigo/cloud-mesh:v21 # image to pull from dockerhub
+        - image: bdpedigo/cloud-mesh:v27 # image to pull from dockerhub
           name: cloud-mesh # name of container in pod
           imagePullPolicy: Always
           command: ["/bin/sh"]
           # runners/predict_synapse_compartments_2024-11-07.py
-          args: ["-c", "while true; do uv run runners/approach_comparisons.py; done"]
+          args: ["-c", "while true; do uv run runners/condensed_features_latest.py; done"]
           env:
             - name: CLOUDSDK_CORE_PROJECT
               value: ${CLOUDSDK_CORE_PROJECT}
@@ -36,7 +36,7 @@ spec:
             - name: N_JOBS
               value: "1"
             - name: REPLICAS
-              value: "8"
+              value: "128"
             - name: OPENBLAS_NUM_THREADS
               value: "1"
             - name: MKL_NUM_THREADS
@@ -52,27 +52,16 @@ spec:
             - name: LOGGING_LEVEL
               value: "ERROR"
             - name: LEASE_SECONDS
-              value: "43200" # 12 hours
+              value: "21600" # 6 hours
 
           resources:
             requests:
-              # memory: "3.0Gi"
-              memory: 16.0Gi
-              # cpu: "600m"
-              cpu: "1800m"
-              ephemeral-storage: "16Gi"
-              # storage: "1Gi"
+              memory: 2.0Gi
+              cpu: "800m"
+              ephemeral-storage: "4Gi"
             limits:
-              memory: "32.0Gi"
+              memory: "24.0Gi"
               ephemeral-storage: "16Gi"
-              # cpu: "900m"
-              # cpu: "800m"
-              # cpu: "15000m"
-
-              
-              # cpu: "925m"
-              # storage: "8Gi"
-              # ephemeral-storage: "8Gi"
           volumeMounts:
             - name: secrets-volume
               mountPath: /root/.cloudvolume/secrets

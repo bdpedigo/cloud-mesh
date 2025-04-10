@@ -96,7 +96,7 @@ def run_for_root(root_id, model_name):
     edge_out_path = model_path / "edges"
     synapse_mappings_path = model_path / "synapse-mappings"
 
-    cf, _ = interpret_path(base_path)
+    cf, _ = interpret_path(model_path)
 
     model_folder = models_folder / model_name
     parameters = toml.load(model_folder / "parameters.toml")
@@ -181,6 +181,7 @@ def run_for_root(root_id, model_name):
         timing_dict["replicas"] = REPLICAS
         timing_dict["n_jobs"] = N_JOBS
         timing_dict["timestamp"] = time.time()
+        timing_dict["model_name"] = model_name
 
         cf.put_json(f"timings/{root_id}.json", timing_dict)
         logging.info(f"Saved timings for {root_id}")
