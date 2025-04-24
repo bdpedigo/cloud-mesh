@@ -49,7 +49,7 @@ RECOMPUTE = os.environ.get("RECOMPUTE", False)
 MAX_RETRIES = int(os.environ.get("MAX_RETRIES", 5))
 BACKOFF_FACTOR = int(os.environ.get("BACKOFF_FACTOR", 4))
 BACKOFF_MAX = int(os.environ.get("BACKOFF_MAX", 240))
-MAX_RUNS = int(os.environ.get("MAX_RUNS", 10))
+MAX_RUNS = int(os.environ.get("MAX_RUNS", 5))
 
 logging.basicConfig(level=LOGGING_LEVEL)
 
@@ -96,6 +96,14 @@ parameters = replace_none(parameters)
 
 @queueable
 def run_for_root(root_id, datastack, version, track_synapses="both"):
+    path = Path(f"gs://bdp-ssa//{datastack}/{MODEL_NAME}")
+
+    cf, _ = interpret_path(path)
+
+    if cf.exists(f"features/{root_id}.npz") and not RECOMPUTE:
+        logging.info(f"Features already extracted for {root_id}")
+        return None
+
     set_session_defaults(
         max_retries=MAX_RETRIES, backoff_factor=BACKOFF_FACTOR, backoff_max=BACKOFF_MAX
     )
@@ -106,10 +114,6 @@ def run_for_root(root_id, datastack, version, track_synapses="both"):
         return None
 
     cv = client.info.segmentation_cloudvolume(progress=False)
-
-    path = Path(f"gs://bdp-ssa//{datastack}/{MODEL_NAME}")
-
-    cf, _ = interpret_path(path)
 
     feature_out_path = path / "features"
     graph_out_path = path / "graphs"
@@ -128,10 +132,6 @@ def run_for_root(root_id, datastack, version, track_synapses="both"):
 
     try:
         total_time = time.time()
-        if cf.exists(f"features/{root_id}.npz") and not RECOMPUTE:
-            logging.info(f"Features already extracted for {root_id}")
-            return None
-
         logging.info(f"Loading mesh for {root_id}")
         currtime = time.time()
         raw_mesh = cv.mesh.get(root_id, **parameters["cv-mesh-get"])[root_id]
@@ -258,7 +258,7 @@ tq = TaskQueue(f"https://sqs.us-west-2.amazonaws.com/629034007606/{QUEUE_NAME}")
 
 
 def stop_fn(executed):
-    if executed > MAX_RUNS:
+    if executed >= MAX_RUNS:
         quit()
 
 
@@ -271,6 +271,7 @@ if REQUEST:
     import pandas as pd
     from cloudfiles import CloudFiles
 
+    tasks = []
     if False:
         cell_table = pd.read_feather(
             "/Users/ben.pedigo/code/meshrep/cloud-mesh/data/v1dd_single_neuron_soma_ids.feather"
@@ -288,6 +289,40 @@ if REQUEST:
         root_ids = np.setdiff1d(root_ids, done_roots)
 
         tasks = [partial(run_for_root, root_id, "v1dd", 974) for root_id in root_ids]
+
+    if False:
+        datastack = "minnie65_phase3_v1"
+        version = 1300
+        client = CAVEclient(datastack_name=datastack, version=version)
+        column_table = client.materialize.query_table(
+            "allen_v1_column_types_slanted_ref"
+        )
+        root_ids = column_table.query("pt_root_id != 0")["pt_root_id"].unique()
+        tasks = [
+            partial(
+                run_for_root(root_id, datastack, version, track_synapses="both")
+                for root_id in root_ids
+            )
+        ]
+
+    if True:
+        datastack = "zheng_ca3"
+        version = 195
+        table = pd.read_csv(
+            "/Users/ben.pedigo/code/meshrep/cloud-mesh/data/zheng_ca3/updated_segids_20250423_manual.csv",
+            index_col=0,
+        )
+        root_ids = table["seg_m195_20250423"].unique()
+
+        tasks = [
+            partial(
+                run_for_root(root_id, datastack, version, track_synapses=False)
+                for root_id in root_ids
+            )
+        ]
+
+    if len(tasks) > 0:
+        tq.insert(tasks)
 
     # data_folder = Path(__file__).parent.parent / "data"
 
@@ -310,7 +345,3 @@ if REQUEST:
     # )
 
     #
-
-    # tq.insert(tasks)
-
-# %%
