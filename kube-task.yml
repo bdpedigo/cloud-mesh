@@ -5,7 +5,7 @@ metadata:
     run: cloud-mesh
   name: cloud-mesh
 spec:
-  replicas: 512 # number of pods to run
+  replicas: 128 # number of pods to run
   selector:
     matchLabels:
       run: cloud-mesh
@@ -20,7 +20,7 @@ spec:
         run: cloud-mesh # metadata label attached to pod
     spec:
       containers:
-        - image: bdpedigo/cloud-mesh:v28 # image to pull from dockerhub
+        - image: bdpedigo/cloud-mesh:v29 # image to pull from dockerhub
           name: cloud-mesh # name of container in pod
           imagePullPolicy: Always
           command: ["/bin/sh"]
@@ -36,7 +36,7 @@ spec:
             - name: N_JOBS
               value: "1"
             - name: REPLICAS
-              value: "512"
+              value: "128"
             - name: OPENBLAS_NUM_THREADS
               value: "1"
             - name: MKL_NUM_THREADS
@@ -52,12 +52,12 @@ spec:
             - name: LOGGING_LEVEL
               value: "ERROR"
             - name: LEASE_SECONDS
-              value: "21600" # 6 hours
+              value: "43200" 
 
           resources:
             requests:
               memory: 2.0Gi
-              cpu: "800m"
+              cpu: "925m"
               ephemeral-storage: "4Gi"
             limits:
               memory: "24.0Gi"

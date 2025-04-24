@@ -6,13 +6,14 @@ import platform
 import sys
 import time
 import traceback
+from functools import partial
 from pathlib import Path
 
 import numpy as np
 import requests
 import toml
 import urllib3
-from caveclient import CAVEclient
+from caveclient import CAVEclient, set_session_defaults
 from taskqueue import TaskQueue, queueable
 
 from meshmash import (
@@ -45,6 +46,10 @@ REQUEST = os.environ.get("REQUEST", not RUN)
 LOGGING_LEVEL = os.environ.get("LOGGING_LEVEL", "ERROR")
 LEASE_SECONDS = int(os.environ.get("LEASE_SECONDS", 7200))
 RECOMPUTE = os.environ.get("RECOMPUTE", False)
+MAX_RETRIES = int(os.environ.get("MAX_RETRIES", 5))
+BACKOFF_FACTOR = int(os.environ.get("BACKOFF_FACTOR", 4))
+BACKOFF_MAX = int(os.environ.get("BACKOFF_MAX", 240))
+MAX_RUNS = int(os.environ.get("MAX_RUNS", 10))
 
 logging.basicConfig(level=LOGGING_LEVEL)
 
@@ -90,7 +95,10 @@ parameters = replace_none(parameters)
 
 
 @queueable
-def run_for_root(root_id, datastack, version):
+def run_for_root(root_id, datastack, version, track_synapses="both"):
+    set_session_defaults(
+        max_retries=MAX_RETRIES, backoff_factor=BACKOFF_FACTOR, backoff_max=BACKOFF_MAX
+    )
     client = CAVEclient(datastack, version=version)
 
     if not client.chunkedgraph.is_latest_roots([root_id])[0]:
@@ -105,7 +113,18 @@ def run_for_root(root_id, datastack, version):
 
     feature_out_path = path / "features"
     graph_out_path = path / "graphs"
-    synapse_mappings_path = path / "synapse-mappings"
+    pre_synapse_mappings_path = path / "pre-synapse-mappings"
+    post_synapse_mappings_path = path / "post-synapse-mappings"
+
+    track_post_synapses = False
+    track_pre_synapses = False
+    if track_synapses == "both":
+        track_post_synapses = True
+        track_pre_synapses = True
+    elif track_synapses == "post":
+        track_post_synapses = True
+    elif track_synapses == "pre":
+        track_pre_synapses = True
 
     try:
         total_time = time.time()
@@ -121,16 +140,42 @@ def run_for_root(root_id, datastack, version):
         logging.info(f"Loaded mesh for {root_id}, has {raw_mesh[0].shape[0]} vertices")
 
         currtime = time.time()
-        synapse_mapping = get_synapse_mapping(
-            root_id, raw_mesh, client, **parameters["project_points_to_mesh"]
-        )
-        if len(synapse_mapping) == 0:
-            logging.info(f"No synapse mapping found for {root_id}")
-        else:
-            save_id_to_mesh_map(
-                synapse_mappings_path / f"{root_id}.npz", synapse_mapping
+        if track_post_synapses:
+            post_synapse_mapping = get_synapse_mapping(
+                root_id,
+                raw_mesh,
+                client,
+                side="post",
+                **parameters["project_points_to_mesh"],
             )
-            logging.info(f"Saved {len(synapse_mapping)} synapse mappings for {root_id}")
+            if len(post_synapse_mapping) == 0:
+                logging.info(f"No synapse mapping found for {root_id}")
+            else:
+                save_id_to_mesh_map(
+                    pre_synapse_mappings_path / f"{root_id}.npz", post_synapse_mapping
+                )
+                logging.info(
+                    f"Saved {len(post_synapse_mapping)} synapse mappings for {root_id}"
+                )
+
+        if track_pre_synapses:
+            pre_synapse_mapping = get_synapse_mapping(
+                root_id,
+                raw_mesh,
+                client,
+                side="pre",
+                **parameters["project_points_to_mesh"],
+            )
+            if len(pre_synapse_mapping) == 0:
+                logging.info(f"No synapse mapping found for {root_id}")
+            else:
+                save_id_to_mesh_map(
+                    post_synapse_mappings_path / f"{root_id}.npz", pre_synapse_mapping
+                )
+                logging.info(
+                    f"Saved {len(pre_synapse_mapping)} synapse mappings for {root_id}"
+                )
+
         synapse_mapping_time = time.time() - currtime
 
         try:
@@ -205,11 +250,16 @@ def run_for_root(root_id, datastack, version):
 tq = TaskQueue(f"https://sqs.us-west-2.amazonaws.com/629034007606/{QUEUE_NAME}")
 
 
-def stop_fn(elapsed_time):
-    if elapsed_time > LEASE_SECONDS:
-        logging.info("Stopping due to time limit.")
-        requests.post(URL, json={"content": "Stopping due to time limit."})
-        return True
+# def stop_fn(elapsed_time):
+#     if elapsed_time > LEASE_SECONDS:
+#         logging.info("Stopping due to time limit.")
+#         requests.post(URL, json={"content": "Stopping due to time limit."})
+#         return True
+
+
+def stop_fn(executed):
+    if executed > MAX_RUNS:
+        quit()
 
 
 if RUN:
@@ -219,12 +269,25 @@ if RUN:
 
 if REQUEST:
     import pandas as pd
+    from cloudfiles import CloudFiles
 
-    cell_table = pd.read_feather(
-        "/Users/ben.pedigo/code/meshrep/cloud-mesh/data/v1dd_single_neuron_soma_ids.feather"
-    )
+    if False:
+        cell_table = pd.read_feather(
+            "/Users/ben.pedigo/code/meshrep/cloud-mesh/data/v1dd_single_neuron_soma_ids.feather"
+        )
 
-    root_ids = np.unique(cell_table["pt_root_id"])
+        root_ids = np.unique(cell_table["pt_root_id"])
+
+        cf = CloudFiles(f"gs://bdp-ssa/v1dd/{MODEL_NAME}")
+        done_files = list(cf.list("features"))
+        done_roots = [
+            int(file.split("/")[-1].split(".")[0])
+            for file in done_files
+            if file.endswith(".npz")
+        ]
+        root_ids = np.setdiff1d(root_ids, done_roots)
+
+        tasks = [partial(run_for_root, root_id, "v1dd", 974) for root_id in root_ids]
 
     # data_folder = Path(__file__).parent.parent / "data"
 
@@ -245,6 +308,9 @@ if REQUEST:
     #     .unique()
     #     .tolist()
     # )
-    # tasks = [partial(run_for_root, root_id) for root_id in root_ids]
+
+    #
 
     # tq.insert(tasks)
+
+# %%
