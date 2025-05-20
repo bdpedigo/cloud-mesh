@@ -14,6 +14,7 @@ import requests
 import toml
 import urllib3
 from caveclient import CAVEclient, set_session_defaults
+from cloudvolume import CloudVolume
 from taskqueue import TaskQueue, queueable
 
 from meshmash import (
@@ -24,6 +25,7 @@ from meshmash import (
     save_condensed_features,
     save_condensed_graph,
     save_id_to_mesh_map,
+    scale_mesh,
 )
 
 SYSTEM = platform.system()
@@ -90,18 +92,22 @@ model_folder = Path(__file__).parent.parent / "models" / MODEL_NAME
 parameters = toml.load(model_folder / "parameters.toml")
 parameters = replace_none(parameters)
 
-
 # %%
 
 
 @queueable
-def run_for_root(root_id, datastack, version, track_synapses="both"):
+def run_for_root(root_id, datastack, version, scale=1.0, track_synapses="both"):
     path = Path(f"gs://bdp-ssa//{datastack}/{MODEL_NAME}")
 
     cf, _ = interpret_path(path)
 
-    if cf.exists(f"features/{root_id}.npz") and not RECOMPUTE:
+    if scale == 1.0 and cf.exists(f"features/{root_id}.npz") and not RECOMPUTE:
         logging.info(f"Features already extracted for {root_id}")
+        return None
+    elif (
+        scale != 1.0 and cf.exists(f"features/{scale}/{root_id}.npz") and not RECOMPUTE
+    ):
+        logging.info(f"Features already extracted for {root_id} at scale {scale}")
         return None
 
     set_session_defaults(
@@ -113,9 +119,9 @@ def run_for_root(root_id, datastack, version, track_synapses="both"):
         logging.info(f"Root {root_id} is not latest, skipping.")
         return None
 
-    cv = client.info.segmentation_cloudvolume(progress=False)
-
     feature_out_path = path / "features"
+    if scale != 1.0:
+        feature_out_path = feature_out_path / str(scale)
     graph_out_path = path / "graphs"
     pre_synapse_mappings_path = path / "pre-synapse-mappings"
     post_synapse_mappings_path = path / "post-synapse-mappings"
@@ -134,10 +140,29 @@ def run_for_root(root_id, datastack, version, track_synapses="both"):
         total_time = time.time()
         logging.info(f"Loading mesh for {root_id}")
         currtime = time.time()
-        raw_mesh = cv.mesh.get(root_id, **parameters["cv-mesh-get"])[root_id]
-        raw_mesh = (raw_mesh.vertices, raw_mesh.faces)
+        if datastack == "zheng_ca3":
+            cv = CloudVolume(
+                "gs://zheng_mouse_hippocampus_production/v2/seg_m195", progress=False
+            )
+            raw_mesh = cv.mesh.get(root_id)[root_id]
+            raw_mesh = raw_mesh.deduplicate_vertices(is_chunk_aligned=True)
+            raw_mesh = (raw_mesh.vertices, raw_mesh.faces)
+            # new_vertices, new_faces = pcu.deduplicate_mesh_vertices(
+            #     raw_mesh[0],
+            #     raw_mesh[1].astype("int32"),
+            #     epsilon=1e-12,
+            #     return_index=False,
+            # )
+            # raw_mesh = (new_vertices, new_faces)
+        else:
+            cv = client.info.segmentation_cloudvolume(progress=False)
+            raw_mesh = cv.mesh.get(root_id, **parameters["cv-mesh-get"])[root_id]
+            raw_mesh = (raw_mesh.vertices, raw_mesh.faces)
         mesh_time = time.time() - currtime
         logging.info(f"Loaded mesh for {root_id}, has {raw_mesh[0].shape[0]} vertices")
+
+        if scale != 1.0:
+            raw_mesh = scale_mesh(raw_mesh, scale)
 
         currtime = time.time()
         if track_post_synapses:
@@ -208,31 +233,32 @@ def run_for_root(root_id, datastack, version, track_synapses="both"):
         )
         logging.info(f"Saved features for {root_id}")
 
-        graph_file = graph_out_path / f"{root_id}.npz"
-        save_condensed_graph(
-            graph_file,
-            result.condensed_nodes,
-            result.condensed_edges,
-            **parameters["save_condensed_graph"],
-        )
-        logging.info(f"Saved edges for {root_id}")
+        if scale == 1.0:
+            graph_file = graph_out_path / f"{root_id}.npz"
+            save_condensed_graph(
+                graph_file,
+                result.condensed_nodes,
+                result.condensed_edges,
+                **parameters["save_condensed_graph"],
+            )
+            logging.info(f"Saved edges for {root_id}")
 
-        timing_dict = result.timing_info
-        timing_dict["root_id"] = str(root_id)
-        timing_dict["n_vertices"] = raw_mesh[0].shape[0]
-        timing_dict["n_faces"] = raw_mesh[1].shape[0]
-        timing_dict["n_condensed_nodes"] = condensed_features.shape[0] - 1
-        timing_dict["n_condensed_edges"] = result.condensed_edges.shape[0]
-        timing_dict["mesh_time"] = mesh_time
-        timing_dict["synapse_mapping_time"] = synapse_mapping_time
-        timing_dict["replicas"] = REPLICAS
-        timing_dict["n_jobs"] = N_JOBS
-        timing_dict["timestamp"] = time.time()
-        timing_dict["total_time"] = time.time() - total_time
-        timing_dict["system"] = SYSTEM
+            timing_dict = result.timing_info
+            timing_dict["root_id"] = str(root_id)
+            timing_dict["n_vertices"] = raw_mesh[0].shape[0]
+            timing_dict["n_faces"] = raw_mesh[1].shape[0]
+            timing_dict["n_condensed_nodes"] = condensed_features.shape[0] - 1
+            timing_dict["n_condensed_edges"] = result.condensed_edges.shape[0]
+            timing_dict["mesh_time"] = mesh_time
+            timing_dict["synapse_mapping_time"] = synapse_mapping_time
+            timing_dict["replicas"] = REPLICAS
+            timing_dict["n_jobs"] = N_JOBS
+            timing_dict["timestamp"] = time.time()
+            timing_dict["total_time"] = time.time() - total_time
+            timing_dict["system"] = SYSTEM
 
-        cf.put_json(f"timings/{root_id}.json", timing_dict)
-        logging.info(f"Saved timings for {root_id}")
+            cf.put_json(f"timings/{root_id}.json", timing_dict)
+            logging.info(f"Saved timings for {root_id}")
 
     except Exception as e:
         msg = f"Error processing {root_id}"
@@ -288,21 +314,24 @@ if REQUEST:
         ]
         root_ids = np.setdiff1d(root_ids, done_roots)
 
-        tasks = [partial(run_for_root, root_id, "v1dd", 974) for root_id in root_ids]
+        tasks += [partial(run_for_root, root_id, "v1dd", 974) for root_id in root_ids]
 
     if False:
         datastack = "minnie65_phase3_v1"
         version = 1300
         client = CAVEclient(datastack_name=datastack, version=version)
-        column_table = client.materialize.query_table(
-            "allen_v1_column_types_slanted_ref"
+
+        table = pd.read_csv(
+            "/Users/ben.pedigo/code/meshrep/meshrep/experiments/cautious-fig-thaw/labels.csv"
         )
-        root_ids = column_table.query("pt_root_id != 0")["pt_root_id"].unique()
-        tasks = [
-            partial(
-                run_for_root(root_id, datastack, version, track_synapses="both")
-                for root_id in root_ids
-            )
+        root_ids = table["pt_root_id"].unique()
+        # column_table = client.materialize.query_table(
+        #     "allen_v1_column_types_slanted_ref"
+        # )
+        # root_ids = column_table.query("pt_root_id != 0")["pt_root_id"].unique()
+        tasks += [
+            partial(run_for_root, root_id, datastack, version, track_synapses="both")
+            for root_id in root_ids
         ]
 
     if True:
@@ -314,11 +343,27 @@ if REQUEST:
         )
         root_ids = table["seg_m195_20250423"].unique()
 
-        tasks = [
+        # tasks += [
+        #     partial(
+        #         run_for_root,
+        #         root_id,
+        #         datastack,
+        #         version,
+        #         scale=1.0,
+        #         track_synapses=False,
+        #     )
+        #     for root_id in root_ids
+        # ]
+        tasks += [
             partial(
-                run_for_root(root_id, datastack, version, track_synapses=False)
-                for root_id in root_ids
+                run_for_root,
+                root_id,
+                datastack,
+                version,
+                scale=0.75,
+                track_synapses=False,
             )
+            for root_id in root_ids
         ]
 
     if len(tasks) > 0:
@@ -345,3 +390,14 @@ if REQUEST:
     # )
 
     #
+
+# %%
+run_for_root(
+    648518346442090245,
+    "zheng_ca3",
+    195,
+    scale=1.0,
+    track_synapses=False,
+)
+
+# %%

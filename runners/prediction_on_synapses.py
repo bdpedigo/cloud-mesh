@@ -6,7 +6,6 @@ import platform
 import sys
 import time
 import traceback
-from functools import partial
 from pathlib import Path
 
 import numpy as np
@@ -19,7 +18,7 @@ from cloudfiles import CloudFiles
 from joblib import load
 from taskqueue import TaskQueue, queueable
 
-from cloudigo import exists, get_dataframe, put_dataframe
+from cloudigo import exists, put_dataframe
 from meshmash import (
     condensed_hks_pipeline,
     find_nucleus_point,
@@ -56,7 +55,7 @@ MAX_RETRIES = int(os.environ.get("MAX_RETRIES", 5))
 BACKOFF_FACTOR = int(os.environ.get("BACKOFF_FACTOR", 4))
 BACKOFF_MAX = int(os.environ.get("BACKOFF_MAX", 240))
 MAX_RUNS = int(os.environ.get("MAX_RUNS", 10))
-
+PREDICT_MULTICOMPARTMENT = os.environ.get("PREDICT_MULTICOMPARTMENT", "false")
 
 logging.basicConfig(level=LOGGING_LEVEL)
 
@@ -123,9 +122,7 @@ def run_for_root(root_id, datastack, version):
     # synapse_mappings_path = path / "synapse-mappings"
 
     try:
-        synapse_prediction_path = (
-            f"gs://bdp-ssa/v1dd/{PARAMETER_NAME}/synapse-predictions/{root_id}.csv.gz"
-        )
+        synapse_prediction_path = f"gs://bdp-ssa/v1dd/{PARAMETER_NAME}/post-synapse-predictions/{root_id}.csv.gz"
 
         if exists(synapse_prediction_path):
             logging.info(f"Synapse predictions already exist for {root_id}")
@@ -135,7 +132,22 @@ def run_for_root(root_id, datastack, version):
         feature_path = Path(
             f"gs://bdp-ssa/{datastack}/{PARAMETER_NAME}/features/{root_id}.npz"
         )
-        condensed_features, condensed_ids = read_condensed_features(feature_path)
+
+        if not exists(feature_path):
+            logging.info(f"Feature file does not exist for {root_id}")
+            return None
+
+        try:
+            condensed_features, condensed_ids = read_condensed_features(feature_path)
+        except EOFError:
+            try:
+                condensed_features, condensed_ids = read_condensed_features(
+                    feature_path
+                )
+            except EOFError as e:
+                logging.info(f"Error reading condensed features for {root_id}")
+                raise e
+
         elapsed_time = time.time() - currtime
         logging.info(
             f"Loaded features for {root_id}, {datastack}, took {elapsed_time:.2f} seconds"
@@ -166,7 +178,15 @@ def run_for_root(root_id, datastack, version):
             f"gs://bdp-ssa/{datastack}/{PARAMETER_NAME}/synapse-mappings/{root_id}.npz"
         )
 
-        synapse_mapping = read_id_to_mesh_map(synapse_mapping_path)
+        try:
+            synapse_mapping = read_id_to_mesh_map(synapse_mapping_path)
+        except EOFError:
+            try:
+                synapse_mapping = read_id_to_mesh_map(synapse_mapping_path)
+            except EOFError as e:
+                logging.info(f"Error reading synapse mapping for {root_id}")
+                raise e
+
         synapse_mapping = pd.Series(
             index=synapse_mapping[:, 0], data=synapse_mapping[:, 1]
         )
@@ -186,7 +206,7 @@ def run_for_root(root_id, datastack, version):
         )
 
         synapse_posterior_entropy = condensed_posterior_entropy.loc[
-            condensed_ids[condensed_ids[synapse_mapping]]
+            condensed_ids[synapse_mapping]
         ].values
         synapse_posterior_entropy = pd.Series(
             synapse_posterior_entropy,
@@ -197,60 +217,77 @@ def run_for_root(root_id, datastack, version):
             f"Ran prediciton for {root_id}, {datastack}, took {time.time() - currtime:.2f} seconds"
         )
 
-        # TODO this could be generalized to be done w/o mesh given the compressed graph,
-        # I think.
-        logging.info(f"Loading mesh for {root_id}, {datastack}")
-        currtime = time.time()
-        cv = client.info.segmentation_cloudvolume(progress=False)
-        raw_mesh = cv.mesh.get(root_id, **parameters["cv-mesh-get"])[root_id]
-        mesh = (raw_mesh.vertices, raw_mesh.faces)
-        elapsed_time = time.time() - currtime
-        logging.info(
-            f"Loaded mesh for {root_id}, {datastack}, has {mesh[0].shape[0]} vertices, took {elapsed_time:.2f} seconds"
-        )
+        if PREDICT_MULTICOMPARTMENT:
+            # TODO this could be generalized to be done w/o mesh given the compressed graph,
+            # I think.
+            logging.info(f"Loading mesh for {root_id}, {datastack}")
+            currtime = time.time()
+            cv = client.info.segmentation_cloudvolume(progress=False)
+            raw_mesh = cv.mesh.get(root_id, **parameters["cv-mesh-get"])[root_id]
+            mesh = (raw_mesh.vertices, raw_mesh.faces)
+            elapsed_time = time.time() - currtime
+            logging.info(
+                f"Loaded mesh for {root_id}, {datastack}, has {mesh[0].shape[0]} vertices, took {elapsed_time:.2f} seconds"
+            )
 
-        currtime = time.time()
-        logging.info(f"Getting label components for {root_id}, {datastack}")
-        mesh_predictions = condensed_predictions.loc[condensed_ids]
+            currtime = time.time()
+            logging.info(f"Getting label components for {root_id}, {datastack}")
+            mesh_predictions = condensed_predictions.loc[condensed_ids]
 
-        label_components = get_label_components(mesh, mesh_predictions)
-        synapse_label_components = label_components[synapse_mapping]
-        synapse_label_components = pd.Series(
-            synapse_label_components,
-            index=synapse_mapping.index,
-            name="component_id",
-        )
-
-        logging.info(
-            f"Got label components for {root_id}, {datastack}, took {time.time() - currtime:.2f} seconds"
-        )
-
-        currtime = time.time()
-        logging.info(f"Saving synapse predictions for {root_id}, {datastack}")
-        synapse_summary = pd.concat(
-            [
-                synapse_predictions,
-                synapse_posterior_max,
-                synapse_posterior_entropy,
+            label_components = get_label_components(mesh, mesh_predictions)
+            synapse_label_components = label_components[synapse_mapping]
+            synapse_label_components = pd.Series(
                 synapse_label_components,
-            ],
-            axis=1,
-        )
-        synapse_summary.rename_axis("id", inplace=True)
-        synapse_summary.dropna(how="any", inplace=True)
+                index=synapse_mapping.index,
+                name="component_id",
+            )
 
-        component_counts = (
-            synapse_summary.query('pred_label == "spine"')
-            .groupby("component_id")
-            .size()
-            .sort_values(ascending=False)
-        )
-        multi_components = component_counts[component_counts > 1].index  # noqa
-        remove_indices = synapse_summary.query(
-            "~component_id.isin(@multi_components)"
-        ).index
-        synapse_summary.loc[remove_indices, "component_id"] = -1
-        synapse_summary.rename(columns={"component_id": "multispine_id"}, inplace=True)
+            logging.info(
+                f"Got label components for {root_id}, {datastack}, took {time.time() - currtime:.2f} seconds"
+            )
+
+            currtime = time.time()
+            logging.info(f"Saving synapse predictions for {root_id}, {datastack}")
+            synapse_summary = pd.concat(
+                [
+                    synapse_predictions,
+                    synapse_posterior_max,
+                    synapse_posterior_entropy,
+                    synapse_label_components,
+                ],
+                axis=1,
+            )
+            synapse_summary.rename_axis("id", inplace=True)
+            synapse_summary.dropna(how="any", inplace=True)
+
+            component_counts = (
+                synapse_summary.query('pred_label == "spine"')
+                .groupby("component_id")
+                .size()
+                .sort_values(ascending=False)
+            )
+            multi_components = component_counts[component_counts > 1].index  # noqa
+            remove_indices = synapse_summary.query(
+                "~component_id.isin(@multi_components)"
+            ).index
+            synapse_summary.loc[remove_indices, "component_id"] = -1
+            synapse_summary.rename(
+                columns={"component_id": "multispine_id"}, inplace=True
+            )
+
+        else:
+            currtime = time.time()
+            logging.info(f"Saving synapse predictions for {root_id}, {datastack}")
+            synapse_summary = pd.concat(
+                [
+                    synapse_predictions,
+                    synapse_posterior_max,
+                    synapse_posterior_entropy,
+                ],
+                axis=1,
+            )
+            synapse_summary.rename_axis("id", inplace=True)
+            synapse_summary.dropna(how="any", inplace=True)
 
         put_dataframe(synapse_summary, synapse_prediction_path)
 
@@ -376,122 +413,128 @@ def run_for_root(root_id, datastack, version):
         requests.post(URL, json={"content": msg})
 
 
-root_id = 864691132533489754
+# root_id = 864691132533489754
 root_id = 864691132533646426
+root_id = 864691132576861197
+root_id = 864691132580143634
 
-# %%
-run_for_root(root_id, "v1dd", 974)
-
-# %%
-synapse_summary = get_dataframe(
-    f"gs://bdp-ssa/v1dd/absolute-solo-yak/synapse-predictions/{root_id}.csv.gz",
-    index_col=0,
-)
-synapse_summary
-# %%
-
-client = CAVEclient("v1dd", version=974)
-synapse_table = client.materialize.synapse_query(
-    post_ids=root_id,
-    desired_resolution=[1, 1, 1],
-)
-synapse_table["pred_label"] = synapse_table["id"].map(synapse_summary["pred_label"])
+# run_for_root(root_id, "v1dd", 974)
 
 # %%
 
-synapse_groups = (
-    synapse_summary.reset_index(drop=False)
-    .query("multispine_id != -1")
-    .groupby("multispine_id")["id"]
-    .unique()
-)
-
-import networkx as nx
-
-synapse_pairs = []
-for multispine_id, synapse_ids in synapse_groups.items():
-    for source, target in nx.utils.pairwise(synapse_ids):
-        synapse_pairs.append((multispine_id, source, target))
-synapse_pairs = pd.DataFrame(
-    synapse_pairs, columns=["multispine_id", "source", "target"]
-)
-synapse_pairs["source_position"] = (
-    synapse_table.set_index("id").loc[synapse_pairs["source"], "ctr_pt_position"].values
-)
-synapse_pairs["target_position"] = (
-    synapse_table.set_index("id").loc[synapse_pairs["target"], "ctr_pt_position"].values
-)
 
 # %%
-from nglui import site_utils, statebuilder
 
-site_utils.set_default_config(target_site="spelunker", datastack_name="v1dd")
+# # %%
+# synapse_summary = get_dataframe(
+#     f"gs://bdp-ssa/v1dd/absolute-solo-yak/synapse-predictions/{root_id}.csv.gz",
+#     index_col=0,
+# )
+# synapse_summary
+# # %%
 
-img, seg = statebuilder.from_client(client)
-seg.add_selection_map(fixed_ids=root_id)
+# client = CAVEclient("v1dd", version=974)
+# synapse_table = client.materialize.synapse_query(
+#     post_ids=root_id,
+#     desired_resolution=[1, 1, 1],
+# )
+# synapse_table["pred_label"] = synapse_table["id"].map(synapse_summary["pred_label"])
 
-anno = statebuilder.AnnotationLayerConfig(
-    name="labeled_synapses",
-    mapping_rules=statebuilder.PointMapper(
-        point_column="ctr_pt_position",
-        description_column="id",
-        tag_column="pred_label",
-        set_position=True,
-        linked_segmentation_column="pre_pt_root_id",
-    ),
-    tags=["soma", "shaft", "spine"],
-    data_resolution=[1, 1, 1],
-)
+# %%
 
-line = statebuilder.AnnotationLayerConfig(
-    name="multispines",
-    mapping_rules=statebuilder.LineMapper(
-        point_column_a="source_position",
-        point_column_b="target_position",
-        description_column="multispine_id",
-    ),
-    data_resolution=[1, 1, 1],
-)
+# synapse_groups = (
+#     synapse_summary.reset_index(drop=False)
+#     .query("multispine_id != -1")
+#     .groupby("multispine_id")["id"]
+#     .unique()
+# )
 
-sb1 = statebuilder.StateBuilder(layers=[img, seg, anno], client=client)
-sb2 = statebuilder.StateBuilder(layers=[line], client=client)
+# import networkx as nx
 
-sb = statebuilder.ChainedStateBuilder([sb1, sb2])
+# synapse_pairs = []
+# for multispine_id, synapse_ids in synapse_groups.items():
+#     for source, target in nx.utils.pairwise(synapse_ids):
+#         synapse_pairs.append((multispine_id, source, target))
+# synapse_pairs = pd.DataFrame(
+#     synapse_pairs, columns=["multispine_id", "source", "target"]
+# )
+# synapse_pairs["source_position"] = (
+#     synapse_table.set_index("id").loc[synapse_pairs["source"], "ctr_pt_position"].values
+# )
+# synapse_pairs["target_position"] = (
+#     synapse_table.set_index("id").loc[synapse_pairs["target"], "ctr_pt_position"].values
+# )
 
-state_dict = sb.render_state(
-    [synapse_table, synapse_pairs],
-    return_as="dict",
-    client=client,
-)
+# %%
+# from nglui import site_utils, statebuilder
 
-shader = """
-void main() {
-int is_soma = int(prop_tag0());
-int is_shaft = int(prop_tag1());
-int is_spine = int(prop_tag2());
-    
-if ((is_soma + is_shaft + is_spine) == 0) {
-    setColor(vec3(0.0, 0.0, 0.0));
-} else if ((is_soma + is_shaft + is_spine) > 1) {
-    setColor(vec3(1.0, 1.0, 1.0));
-} else if (is_soma > 0) {
-    setColor(vec3(0, 0.890196, 1.0));
-} else if (is_shaft > 0) {
-    setColor(vec3(0.9372549, 0.90196078, 0.27058824));
-} else if (is_spine > 0) {
-    setColor(vec3(0.91372549, 0.20784314, 0.63137255));
-}
-setPointMarkerSize(15.0);
-}
-"""
-state_dict["layers"][-2]["shader"] = shader
+# site_utils.set_default_config(target_site="spelunker", datastack_name="v1dd")
 
-state_id = client.state.upload_state_json(state_dict)
+# img, seg = statebuilder.from_client(client)
+# seg.add_selection_map(fixed_ids=root_id)
 
-base_url = "https://spelunker.cave-explorer.org/#!middleauth+https://globalv1.em.brain.allentech.org/nglstate/api/v1/"
+# anno = statebuilder.AnnotationLayerConfig(
+#     name="labeled_synapses",
+#     mapping_rules=statebuilder.PointMapper(
+#         point_column="ctr_pt_position",
+#         description_column="id",
+#         tag_column="pred_label",
+#         set_position=True,
+#         linked_segmentation_column="pre_pt_root_id",
+#     ),
+#     tags=["soma", "shaft", "spine"],
+#     data_resolution=[1, 1, 1],
+# )
 
-url = base_url + str(state_id)
-print(url)
+# line = statebuilder.AnnotationLayerConfig(
+#     name="multispines",
+#     mapping_rules=statebuilder.LineMapper(
+#         point_column_a="source_position",
+#         point_column_b="target_position",
+#         description_column="multispine_id",
+#     ),
+#     data_resolution=[1, 1, 1],
+# )
+
+# sb1 = statebuilder.StateBuilder(layers=[img, seg, anno], client=client)
+# sb2 = statebuilder.StateBuilder(layers=[line], client=client)
+
+# sb = statebuilder.ChainedStateBuilder([sb1, sb2])
+
+# state_dict = sb.render_state(
+#     [synapse_table, synapse_pairs],
+#     return_as="dict",
+#     client=client,
+# )
+
+# shader = """
+# void main() {
+# int is_soma = int(prop_tag0());
+# int is_shaft = int(prop_tag1());
+# int is_spine = int(prop_tag2());
+
+# if ((is_soma + is_shaft + is_spine) == 0) {
+#     setColor(vec3(0.0, 0.0, 0.0));
+# } else if ((is_soma + is_shaft + is_spine) > 1) {
+#     setColor(vec3(1.0, 1.0, 1.0));
+# } else if (is_soma > 0) {
+#     setColor(vec3(0, 0.890196, 1.0));
+# } else if (is_shaft > 0) {
+#     setColor(vec3(0.9372549, 0.90196078, 0.27058824));
+# } else if (is_spine > 0) {
+#     setColor(vec3(0.91372549, 0.20784314, 0.63137255));
+# }
+# setPointMarkerSize(15.0);
+# }
+# """
+# state_dict["layers"][-2]["shader"] = shader
+
+# state_id = client.state.upload_state_json(state_dict)
+
+# base_url = "https://spelunker.cave-explorer.org/#!middleauth+https://globalv1.em.brain.allentech.org/nglstate/api/v1/"
+
+# url = base_url + str(state_id)
+# print(url)
 # %%
 # synapse_summary.query("component_id.isin(@multi_components)").groupby("component_id")[
 #     "id"
@@ -499,11 +542,9 @@ print(url)
 
 # %%
 
-# %%
-
-datastack = "v1dd"
-version = 974
-root_id = 864691132533489754
+# datastack = "v1dd"
+# version = 974
+# root_id = 864691132533489754
 
 
 # cv = client.info.segmentation_cloudvolume(progress=False)
@@ -517,7 +558,7 @@ root_id = 864691132533489754
 # synapse_mappings_path = path / "synapse-mappings"
 
 
-synapse_summary.head(20)
+# synapse_summary.head(20)
 
 # %%
 
@@ -552,11 +593,11 @@ if REQUEST:
     root_ids = np.unique(cell_table["pt_root_id"])
 
     cf = CloudFiles(f"gs://bdp-ssa/v1dd/{PARAMETER_NAME}")
-    done_files = list(cf.list("features"))
+    done_files = list(cf.list("post-synapse-predictions"))
     done_roots = [
         int(file.split("/")[-1].split(".")[0])
         for file in done_files
-        if file.endswith(".npz")
+        if file.endswith(".csv.gz")
     ]
     root_ids = np.setdiff1d(root_ids, done_roots)
     # data_folder = Path(__file__).parent.parent / "data"
@@ -579,8 +620,92 @@ if REQUEST:
     #     .tolist()
     # )
 
-    tasks = [partial(run_for_root, root_id, "v1dd", 974) for root_id in root_ids]
+    # tasks = [partial(run_for_root, root_id, "v1dd", 974) for root_id in root_ids]
 
     # tq.insert(tasks)
+
+# %%
+cf = CloudFiles(f"gs://bdp-ssa/v1dd/{PARAMETER_NAME}", progress=True, parallel=0)
+done_files = list(cf.list("post-synapse-predictions"))
+data = cf.get(done_files)
+
+# %%
+
+from io import BytesIO
+
+from tqdm import tqdm
+
+compression = "gzip"
+dfs = []
+for cell_data in tqdm(data):
+    bytes_out = cell_data["content"]
+    with BytesIO(bytes_out) as f:
+        df = pd.read_csv(f, compression=compression)
+    root_id = int(cell_data["path"].split("/")[-1].split(".")[0])
+    df["root_id"] = root_id
+    dfs.append(df)
+# %%
+
+df = pd.concat(dfs)
+
+# %%
+multispine_index = df.set_index(['root_id', 'multispine_id']).index
+
+# %%
+multi_df = df.query('multispine_id != -1').copy()
+
+# multi_df[["root_id", "multispine_id"]].drop_duplicates().to_csv(
+
+root_components = multi_df.groupby(["root_id", "multispine_id"]).size().index
+multi_id_map = dict(zip(root_components, range(len(root_components))))
+
+multi_df['multispine_id'] = list(
+    map(multi_id_map.get, zip(multi_df["root_id"], multi_df["multispine_id"]))
+)
+# %%
+df.set_index('id', inplace=True)
+#%%
+df.loc[multi_df['id'].values, 'multispine_id'] = multi_df['multispine_id'].values
+
+# %%
+
+df.to_csv("v1dd_spine_predictions.csv.gz")
+
+# "gs://bdp-ssa/v1dd/absolute-solo-yak/v1dd_spine_predictions.csv.gz"
+
+#%%
+datastack = "v1dd"
+version = 974
+client = CAVEclient(datastack, version=version)
+
+
+table_name = "synapse_target_predictions_ssa"
+schema_name = "reference_tag"
+description = """
+This table contains synapse target structure predictions ('soma', 'shaft', 'spine') for
+synapses in 'synapses_v1dd'. The predictions come
+from a model trained on synapse target annotations from the minnie65 dataset. The model 
+is a random forest trained on spectral shape analysis features from the mesh. 
+Current failure modes include some stubby spines being predicted as shafts, and some 
+very thin dendrites being classified as spines. Created and maintained by Ben Pedigo at 
+AIBS.
+"""
+voxel_resolution = [9.7, 9.7, 45.0]
+track_target_id_updates = False  # ?
+notice_text = """
+Table in development, contact Ben Pedigo with questions or feedback. Citation 
+forthcoming, reach out if wanting to use for publication.
+"""
+# reference_table = {"synapses_pni_2": table_name}
+reference_table = "synapses_v1dd"
+client.annotation.create_table(
+    table_name=table_name,
+    schema_name=schema_name,
+    reference_table=reference_table,
+    description=description,
+    voxel_resolution=voxel_resolution,
+    track_target_id_updates=track_target_id_updates,
+    notice_text=notice_text,
+)
 
 # %%
