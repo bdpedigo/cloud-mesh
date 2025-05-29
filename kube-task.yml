@@ -53,7 +53,7 @@ spec:
             - name: LOGGING_LEVEL
               value: "ERROR"
             - name: LEASE_SECONDS
-              value: "14400"
+              value: "28800"
 
           resources:
             requests:

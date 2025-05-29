@@ -52,4 +52,4 @@ kubectl create secret generic secrets \
     --from-file=$HOME/.cloudvolume/secrets/cave_datastack_to_server_map.json \
     --from-file=$HOME/.cloudvolume/secrets/globalv1.em.brain.allentech.org-cave-secret.json \
 
-# kubectl apply -f kube-task.yml
+kubectl apply -f kube-task.yml

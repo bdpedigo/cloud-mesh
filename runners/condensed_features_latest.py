@@ -271,6 +271,28 @@ def run_for_root(root_id, datastack, version, scale=1.0, track_synapses="both"):
         requests.post(URL, json={"content": msg})
 
 
+# #%%
+# client = CAVEclient("minnie65_phase3_v1", version=1412)
+
+# thalamic_table = (
+#     client.materialize.tables.proofreading_status_and_strategy(status_dendrite="f")
+#     .query()
+#     .query("strategy_dendrite=='none'")
+# )
+
+# #%%
+# for root_id in thalamic_table["pt_root_id"].unique():
+#     try:
+#         run_for_root(
+#             root_id,
+#             "minnie65_phase3_v1",
+#             1412,
+#             scale=1.0,
+#             track_synapses="both",
+#         )
+#     except Exception as e:
+#         logging.error(f"Error processing {root_id}: {e}")
+
 # %%
 
 tq = TaskQueue(f"https://sqs.us-west-2.amazonaws.com/629034007606/{QUEUE_NAME}")
@@ -316,25 +338,59 @@ if REQUEST:
 
         tasks += [partial(run_for_root, root_id, "v1dd", 974) for root_id in root_ids]
 
-    if False:
+    if True:
         datastack = "minnie65_phase3_v1"
-        version = 1300
+        version = 1412
         client = CAVEclient(datastack_name=datastack, version=version)
 
-        table = pd.read_csv(
-            "/Users/ben.pedigo/code/meshrep/meshrep/experiments/cautious-fig-thaw/labels.csv"
-        )
-        root_ids = table["pt_root_id"].unique()
+        # NOTE: this was for getting cells with labels in my training set
+        # table = pd.read_csv(
+        #     "/Users/ben.pedigo/code/meshrep/meshrep/experiments/cautious-fig-thaw/labels.csv"
+        # )
+        # root_ids = table["pt_root_id"].unique()
+
+        # NOTE: this was for getting all cells in the column
         # column_table = client.materialize.query_table(
         #     "allen_v1_column_types_slanted_ref"
         # )
-        # root_ids = column_table.query("pt_root_id != 0")["pt_root_id"].unique()
+
+        # NOTE: this was for getting all putative neurons
+        # table = (
+        #     client.materialize.query_view("""aibs_cell_info""")
+        #     .drop_duplicates("pt_root_id", keep=False)
+        #     .set_index("pt_root_id")
+        #     .query("broad_type == 'excitatory' or broad_type == 'inhibitory'")
+        #     .query("pt_root_id != 0")
+        # )
+
+        # NOTE: this was for getting column inputs at 1412
+        table = (
+            pd.read_csv("meshrep/data/random/synapses_onto_column_count_1412.csv")
+            .set_index("pre_pt_root_id")
+            .query("synapse_onto_column_count_1412 >= 3")
+        )
+        root_ids = table.index.unique()
         tasks += [
-            partial(run_for_root, root_id, datastack, version, track_synapses="both")
+            partial(run_for_root, root_id, datastack, 1412, track_synapses="both")
             for root_id in root_ids
         ]
 
-    if True:
+        # NOTE: this was for getting column inputs at 117
+        table = (
+            pd.read_csv(
+                "/Users/ben.pedigo/code/meshrep/meshrep/data/random/old_pre_status.csv"
+            )
+            .set_index("old_pre_pt_root_id")
+            .query("(synapse_onto_column_count_1412 >= 3) and (is_latest_at_117)")
+        )
+        root_ids = table.index.unique()
+        tasks += [
+            partial(run_for_root, root_id, datastack, 117, track_synapses="both")
+            for root_id in root_ids
+        ]
+        
+
+    if False:
         datastack = "zheng_ca3"
         version = 195
         table = pd.read_csv(
@@ -390,14 +446,5 @@ if REQUEST:
     # )
 
     #
-
-# %%
-run_for_root(
-    648518346442090245,
-    "zheng_ca3",
-    195,
-    scale=1.0,
-    track_synapses=False,
-)
 
 # %%
