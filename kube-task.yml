@@ -5,7 +5,7 @@ metadata:
     run: cloud-mesh
   name: cloud-mesh
 spec:
-  replicas: 128 # number of pods to run
+  replicas: 256 # number of pods to run
   selector:
     matchLabels:
       run: cloud-mesh
@@ -37,7 +37,7 @@ spec:
             - name: N_JOBS
               value: "1"
             - name: REPLICAS
-              value: "128"
+              value: "256"
             - name: OPENBLAS_NUM_THREADS
               value: "1"
             - name: MKL_NUM_THREADS
@@ -51,7 +51,7 @@ spec:
             - name: RUN
               value: "true"
             - name: LOGGING_LEVEL
-              value: "ERROR"
+              value: "INFO"
             - name: LEASE_SECONDS
               value: "28800"
 
