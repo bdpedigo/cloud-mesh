@@ -30,6 +30,7 @@ WORKDIR /app/cloud-mesh
 # Then, install the rest of the project
 ADD cloudigo /app/cloudigo
 ADD meshmash /app/meshmash
+ADD cave-mapper /app/cave-mapper
 RUN uv sync
 # RUN --mount=type=cache,target=/root/.cache/uv \
 #     uv sync --frozen
@@ -37,6 +38,8 @@ RUN uv sync
 # Place executables in the environment at the front of the path
 ENV PATH="/app/.venv/bin:$PATH"
 ENV RUN_JOBS='True'
+ENV RUN='True'
 ENV TEST_RUN='False'
+ENV REQUEST='False'
 
-CMD ["uv", "run", "runners/condensed_features_latest.py"]
+CMD ["uv", "run", "runners/condensed_features_latest_smart.py"]

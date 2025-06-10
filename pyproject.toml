@@ -1,5 +1,6 @@
 [project]
 dependencies = [
+    "cave-mapper",
     "caveclient>=7.2.1",
     "cloud-files>=4.27.0",
     "cloud-volume>=11.0.2",
@@ -18,5 +19,6 @@ requires-python = ">=3.12,<3.13"
 version = "0.1.0"
 
 [tool.uv.sources]
-meshmash = { path = "../meshmash" }
-cloudigo = { path = "../cloudigo" }
+cloudigo = { path = "../cloudigo", editable = true }
+cave-mapper = { path = "../cave-mapper", editable = true }
+meshmash = { path = "../meshmash", editable = true }

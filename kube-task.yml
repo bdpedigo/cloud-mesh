@@ -5,7 +5,7 @@ metadata:
     run: cloud-mesh
   name: cloud-mesh
 spec:
-  replicas: 256 # number of pods to run
+  replicas: 128 # number of pods to run
   selector:
     matchLabels:
       run: cloud-mesh
@@ -20,12 +20,12 @@ spec:
         run: cloud-mesh # metadata label attached to pod
     spec:
       containers:
-        - image: bdpedigo/cloud-mesh:v34 # image to pull from dockerhub
+        - image: bdpedigo/cloud-mesh:v35 # image to pull from dockerhub
           name: cloud-mesh # name of container in pod
           imagePullPolicy: Always
           command: ["/bin/sh"]
           # runners/predict_synapse_compartments_2024-11-07.py
-          args: ["-c", "while true; do uv run runners/condensed_features_latest.py; done"]
+          args: ["-c", "while true; do uv run runners/condensed_features_latest_smart.py; done"]
           # args: ["-c", "while true; do uv run runners/prediction_on_synapses.py; done"]
           env:
             - name: CLOUDSDK_CORE_PROJECT
@@ -37,7 +37,7 @@ spec:
             - name: N_JOBS
               value: "1"
             - name: REPLICAS
-              value: "256"
+              value: "128"
             - name: OPENBLAS_NUM_THREADS
               value: "1"
             - name: MKL_NUM_THREADS

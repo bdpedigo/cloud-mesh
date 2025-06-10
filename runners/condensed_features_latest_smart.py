@@ -4,8 +4,8 @@ import logging
 import os
 import platform
 import sys
-import time
 import traceback
+from functools import partial
 from pathlib import Path
 from typing import Any, Optional, Union
 
@@ -20,6 +20,7 @@ from caveclient import CAVEclient, set_session_defaults
 from cloudfiles import CloudFiles
 from cloudvolume import CloudVolume
 from joblib import load
+from taskqueue import TaskQueue, queueable
 
 from cloudigo import exists, get_dataframe, put_dataframe
 from meshmash import (
@@ -108,7 +109,7 @@ def loggable(func):
         try:
             return func(*args, **kwargs)
         except Exception as e:
-            msg = f"Error in {func.__name__} with experiment {args[0]}"
+            msg = f"Error in {func.__name__} with Morphology {args[0]}"
             msg += "\n\n" + str(e)
             exc_type, exc_value, exc_traceback = sys.exc_info()
             exp = traceback.format_exception(
@@ -124,18 +125,14 @@ def loggable(func):
 
 
 @attrs.define
-class Experiment:
+class Morphology:
     root_id: int = attrs.field()
     datastack: str = attrs.field()
     version: int = attrs.field()
     scale: float = attrs.field(default=1.0)
-    model: Optional[Any] = attrs.field(
-        default=None, repr=False, init=True
-    )  # Placeholder for the model, can be set later
+    model: Optional[Any] = attrs.field(default=None, repr=False, init=True)
     select_label: Optional[Union[str, int]] = attrs.field(
-        default=None,
-        repr=False,
-        init=True,
+        default=None, repr=False, init=True
     )
 
     _path: Path = attrs.field(init=False, repr=False)
@@ -143,7 +140,9 @@ class Experiment:
     _client: CAVEclient = attrs.field(init=False, default=None, repr=False)
     _mesh: tuple = attrs.field(init=False, default=None, repr=False)
     _pre_synapse_mapping: np.ndarray = attrs.field(init=False, default=None, repr=False)
-    _post_synapse_mappings: pd.Series = attrs.field(init=False, default=None, repr=False)
+    _post_synapse_mappings: pd.Series = attrs.field(
+        init=False, default=None, repr=False
+    )
     _nuc_point: np.ndarray = attrs.field(init=False, default=None, repr=False)
     _checked_nuc_point: bool = attrs.field(init=False, default=False, repr=False)
     _labels: np.ndarray = attrs.field(init=False, default=None, repr=False)
@@ -527,10 +526,8 @@ class Experiment:
             self.mesh_predictions,
             select_label=self.select_label,
             post_synapse_mappings=self.post_synapse_mappings,
-            verbose=True,
-
+            verbose=VERBOSE,
         )
-        morphometry_summary.drop(columns=["n_interior_samples"])
 
         points = morphometry_summary[["x", "y", "z"]].values
         mask = np.isfinite(points).all(axis=1)
@@ -572,7 +569,7 @@ class Experiment:
             self._path / f"{self.select_label}-morphometry" / f"{self.root_id}.csv.gz"
         )
         if self._morphometry_summary is None:
-            if not exists(morphometry_summary_path) or True:
+            if not exists(morphometry_summary_path) or RECOMPUTE:
                 self._morphometry_pipeline()
             else:
                 self._morphometry_summary = get_dataframe(
@@ -600,89 +597,166 @@ class Experiment:
         return out
 
 
+@queueable
+def run_for_root(
+    root_id: int,
+    datastack: str,
+    version: int,
+):
+    morph = Morphology(root_id, datastack, version, model=model, select_label="spine")
+    morph.morphometry_summary
+    return True
+
+
 PARAMETER_NAME = "absolute-solo-yak"
 model_folder = Path(__file__).parent.parent / "models" / PARAMETER_NAME
-model_path = model_folder / "hks_model_calibrated.joblib"
+model_path = model_folder / "hks_binary_model_calibrated.joblib"
 model = load(model_path)
 
-RECOMPUTE = False
-root_id = 648518346428852915
-datastack = "zheng_ca3"
-version = 195
-e = Experiment(root_id, datastack, version, model=model, select_label="spine")
-
-# e.labels
-# e.condensed_features
-# e._post_target_prediction()
-# e.synapse_prediction_summary
-
-# e.mesh_predictions
-# RECOMPUTE = True
-
-currtime = time.time()
-morphometry_summary = e.morphometry_summary
-print(f"{time.time() - currtime:.3f} seconds elapsed.")
-
 # %%
-# mesh = e.mesh
-morphometry_summary
 
 
-# %%
-morphometry_summary["n_synapses"] = 0
-for component in e.post_synapse_components:
-    if component != -1:
-        morphometry_summary.loc[component, "n_synapses"] += 1
+tq = TaskQueue(f"https://sqs.us-west-2.amazonaws.com/629034007606/{QUEUE_NAME}")
+
+
+def stop_fn(executed):
+    if executed >= MAX_RUNS:
+        quit()
+
+
+if RUN:
+    tq.poll(lease_seconds=LEASE_SECONDS, verbose=False, tally=False, stop_fn=stop_fn)
 
 # %%
 
-# col = "x"
-# col = 'area_nm2'
-# x = morphometry_summary.reindex(e.components)[col].isna().values & (
-#     e.components > 0
-# )
-# # x[x < 0] = morphometry_summary['fiedler_eval'].max()
-# x = np.log(x)
 
-# clim = [morphometry_summary[col].min(), morphometry_summary[col].max()]
+if REQUEST:
+    import pandas as pd
+    from cloudfiles import CloudFiles
 
-import pyvista as pv
+    tasks = []
+    if False:
+        cell_table = pd.read_feather(
+            "/Users/ben.pedigo/code/meshrep/cloud-mesh/data/v1dd_single_neuron_soma_ids.feather"
+        )
 
-plotter = pv.Plotter()
+        root_ids = np.unique(cell_table["pt_root_id"])
 
-plotter.add_mesh(pv.make_tri_mesh(*e.mesh), color="lightgray", opacity=0.5)
-plotter.add_points(
-    morphometry_summary[["x", "y", "z"]].values,
-    scalars=morphometry_summary["n_post_synapses"].values,
-    point_size=10,
-    cmap="Reds",
-    render_points_as_spheres=True,
-    # scalar_bar_args={"title": "Size (nm³)"},
-)
+        cf = CloudFiles(f"gs://bdp-ssa/v1dd/{MODEL_NAME}")
+        done_files = list(cf.list("features"))
+        done_roots = [
+            int(file.split("/")[-1].split(".")[0])
+            for file in done_files
+            if file.endswith(".npz")
+        ]
+        root_ids = np.setdiff1d(root_ids, done_roots)
 
-plotter.enable_fly_to_right_click()
-plotter.show()
+        tasks += [partial(run_for_root, root_id, "v1dd", 974) for root_id in root_ids]
 
-# %%
+    if False:
+        datastack = "minnie65_phase3_v1"
+        version = 1412
+        client = CAVEclient(datastack_name=datastack, version=version)
 
-plotter = pv.Plotter()
-morphometry_summary["graph_fiedler_eval_rank"] = morphometry_summary[
-    "graph_fiedler_eval"
-].rank(ascending=True, method="first")
-plotter.add_mesh(
-    pv.make_tri_mesh(*e.mesh),
-    scalars=morphometry_summary["graph_fiedler_eval_rank"]
-    .reindex(e.components)
-    .fillna(morphometry_summary["graph_fiedler_eval_rank"].max())
-    .values,
-    cmap="Reds_r",
-)
-plotter.enable_fly_to_right_click()
-plotter.show()
+        # NOTE: this was for getting cells with labels in my training set
+        # table = pd.read_csv(
+        #     "/Users/ben.pedigo/code/meshrep/meshrep/experiments/cautious-fig-thaw/labels.csv"
+        # )
+        # root_ids = table["pt_root_id"].unique()
 
-# %%
-import seaborn as sns
+        # NOTE: this was for getting all cells in the column
+        # column_table = client.materialize.query_table(
+        #     "allen_v1_column_types_slanted_ref"
+        # )
 
-sns.histplot(data=morphometry_summary, x="size_nm3", log_scale=True)
+        # NOTE: this was for getting all putative neurons
+        # table = (
+        #     client.materialize.query_view("""aibs_cell_info""")
+        #     .drop_duplicates("pt_root_id", keep=False)
+        #     .set_index("pt_root_id")
+        #     .query("broad_type == 'excitatory' or broad_type == 'inhibitory'")
+        #     .query("pt_root_id != 0")
+        # )
+
+        # NOTE: this was for getting column inputs at 1412
+        table = (
+            pd.read_csv("meshrep/data/random/synapses_onto_column_count_1412.csv")
+            .set_index("pre_pt_root_id")
+            .query("synapse_onto_column_count_1412 >= 3")
+        )
+        root_ids = table.index.unique()
+        tasks += [
+            partial(run_for_root, root_id, datastack, 1412, track_synapses="both")
+            for root_id in root_ids
+        ]
+
+        # NOTE: this was for getting column inputs at 117
+        table = (
+            pd.read_csv(
+                "/Users/ben.pedigo/code/meshrep/meshrep/data/random/old_pre_status.csv"
+            )
+            .set_index("old_pre_pt_root_id")
+            .query("(synapse_onto_column_count_1412 >= 3) and (is_latest_at_117)")
+        )
+        root_ids = table.index.unique()
+        tasks += [
+            partial(run_for_root, root_id, datastack, 117, track_synapses="both")
+            for root_id in root_ids
+        ]
+
+    if True:
+        datastack = "zheng_ca3"
+        version = 195
+        table = pd.read_csv(
+            "/Users/ben.pedigo/code/meshrep/cloud-mesh/data/zheng_ca3/updated_segids_20250423_manual.csv",
+            index_col=0,
+        )
+        root_ids = table["seg_m195_20250423"].unique()
+
+        # tasks += [
+        #     partial(
+        #         run_for_root,
+        #         root_id,
+        #         datastack,
+        #         version,
+        #         scale=1.0,
+        #         track_synapses=False,
+        #     )
+        #     for root_id in root_ids
+        # ]
+        tasks += [
+            partial(
+                run_for_root,
+                root_id,
+                datastack,
+                version,
+            )
+            for root_id in root_ids
+        ]
+
+    if len(tasks) > 0:
+        tq.insert(tasks)
+
+    # data_folder = Path(__file__).parent.parent / "data"
+
+    # labels_df = pd.read_csv(data_folder / "unified_labels.csv")
+    # labels_df.query("source == 'vortex_compartment_targets'", inplace=True)
+    # root_ids = labels_df["root_id"].unique().tolist()
+    # custom_roots = [
+    #     864691135494786192,
+    #     864691135851320007,
+    #     864691135940636929,
+    #     864691137198691137,
+    # ]
+    # root_ids += custom_roots
+    # request_table = client.materialize.query_table("allen_v1_column_types_slanted_ref")
+    # root_ids += (
+    #     request_table.query("pt_root_id != 0")
+    #     .drop_duplicates("pt_root_id", keep=False)["pt_root_id"]
+    #     .unique()
+    #     .tolist()
+    # )
+
+    #
 
 # %%
