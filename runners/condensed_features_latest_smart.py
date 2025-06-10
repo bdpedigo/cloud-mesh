@@ -64,7 +64,7 @@ BACKOFF_FACTOR = int(os.environ.get("BACKOFF_FACTOR", 4))
 BACKOFF_MAX = int(os.environ.get("BACKOFF_MAX", 240))
 MAX_RUNS = int(os.environ.get("MAX_RUNS", 5))
 
-logging.basicConfig(level=LOGGING_LEVEL)
+logging.basicConfig(level="ERROR")
 
 logging.getLogger("meshmash").setLevel(level=LOGGING_LEVEL)
 
@@ -143,7 +143,7 @@ class Experiment:
     _client: CAVEclient = attrs.field(init=False, default=None, repr=False)
     _mesh: tuple = attrs.field(init=False, default=None, repr=False)
     _pre_synapse_mapping: np.ndarray = attrs.field(init=False, default=None, repr=False)
-    _post_synapse_mapping: pd.Series = attrs.field(init=False, default=None, repr=False)
+    _post_synapse_mappings: pd.Series = attrs.field(init=False, default=None, repr=False)
     _nuc_point: np.ndarray = attrs.field(init=False, default=None, repr=False)
     _checked_nuc_point: bool = attrs.field(init=False, default=False, repr=False)
     _labels: np.ndarray = attrs.field(init=False, default=None, repr=False)
@@ -260,38 +260,38 @@ class Experiment:
 
     @property
     @loggable
-    def post_synapse_mapping(self):
-        if self._post_synapse_mapping is None:
+    def post_synapse_mappings(self):
+        if self._post_synapse_mappings is None:
             root_id = self.root_id
             client = self.client
 
-            post_synapse_mapping_file = (
+            post_synapse_mappings_file = (
                 self._path / "post-synapse-mappings" / f"{root_id}.npz"
             )
 
-            if not exists(post_synapse_mapping_file) or RECOMPUTE:
+            if not exists(post_synapse_mappings_file) or RECOMPUTE:
                 logging.info(
-                    f"Searched for post-synapse mapping at {post_synapse_mapping_file}"
+                    f"Searched for post-synapse mapping at {post_synapse_mappings_file}"
                 )
                 logging.info(f"Post-synapse mapping not found for {root_id}")
-                post_synapse_mapping = get_synapse_mapping(
+                post_synapse_mappings = get_synapse_mapping(
                     root_id,
                     self.mesh,
                     client,
                     side="post",
                     **parameters["project_points_to_mesh"],
                 )
-                save_id_to_mesh_map(post_synapse_mapping_file, post_synapse_mapping)
+                save_id_to_mesh_map(post_synapse_mappings_file, post_synapse_mappings)
                 logging.info(
-                    f"Saved {len(post_synapse_mapping)} synapse mappings for {root_id}"
+                    f"Saved {len(post_synapse_mappings)} synapse mappings for {root_id}"
                 )
             else:
-                post_synapse_mapping = read_id_to_mesh_map(post_synapse_mapping_file)
-            post_synapse_mapping = pd.Series(
-                index=post_synapse_mapping[:, 0], data=post_synapse_mapping[:, 1]
+                post_synapse_mappings = read_id_to_mesh_map(post_synapse_mappings_file)
+            post_synapse_mappings = pd.Series(
+                index=post_synapse_mappings[:, 0], data=post_synapse_mappings[:, 1]
             )
-            self._post_synapse_mapping = post_synapse_mapping
-        return self._post_synapse_mapping
+            self._post_synapse_mappings = post_synapse_mappings
+        return self._post_synapse_mappings
 
     @property
     @loggable
@@ -466,7 +466,7 @@ class Experiment:
         condensed_predictions = self.condensed_predictions
         condensed_posteriors = self.condensed_posteriors
         condensed_posterior_entropy = self.condensed_posterior_entropy
-        synapse_mapping = self.post_synapse_mapping
+        synapse_mapping = self.post_synapse_mappings
 
         synapse_predictions = condensed_predictions.loc[
             condensed_ids[synapse_mapping]
@@ -526,7 +526,9 @@ class Experiment:
             self.mesh,
             self.mesh_predictions,
             select_label=self.select_label,
+            post_synapse_mappings=self.post_synapse_mappings,
             verbose=True,
+
         )
         morphometry_summary.drop(columns=["n_interior_samples"])
 
@@ -570,7 +572,7 @@ class Experiment:
             self._path / f"{self.select_label}-morphometry" / f"{self.root_id}.csv.gz"
         )
         if self._morphometry_summary is None:
-            if not exists(morphometry_summary_path) or True:
+            if not exists(morphometry_summary_path) or RECOMPUTE:
                 self._morphometry_pipeline()
             else:
                 self._morphometry_summary = get_dataframe(
@@ -593,8 +595,8 @@ class Experiment:
         return self._components
 
     @property
-    def post_synapse_component(self):
-        out = self.components[self.post_synapse_mapping]
+    def post_synapse_components(self):
+        out = self.components[self.post_synapse_mappings]
         return out
 
 
@@ -604,10 +606,10 @@ model_path = model_folder / "hks_model_calibrated.joblib"
 model = load(model_path)
 
 RECOMPUTE = False
-
-e = Experiment(
-    864691135494786192, "minnie65_phase3_v1", 1412, model=model, select_label="spine"
-)
+root_id = 648518346428852915
+datastack = "zheng_ca3"
+version = 195
+e = Experiment(root_id, datastack, version, model=model, select_label="spine")
 
 # e.labels
 # e.condensed_features
@@ -645,11 +647,11 @@ plotter = pv.Plotter()
 plotter.add_mesh(pv.make_tri_mesh(*e.mesh), color="lightgray", opacity=0.5)
 plotter.add_points(
     morphometry_summary[["x", "y", "z"]].values,
-    scalars=morphometry_summary["size_nm3"].values,
+    scalars=morphometry_summary["n_post_synapses"].values,
     point_size=10,
     cmap="Reds",
     render_points_as_spheres=True,
-    scalar_bar_args={"title": "Size (nm³)"},
+    # scalar_bar_args={"title": "Size (nm³)"},
 )
 
 plotter.enable_fly_to_right_click()
