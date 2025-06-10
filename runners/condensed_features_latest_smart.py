@@ -572,7 +572,7 @@ class Experiment:
             self._path / f"{self.select_label}-morphometry" / f"{self.root_id}.csv.gz"
         )
         if self._morphometry_summary is None:
-            if not exists(morphometry_summary_path) or RECOMPUTE:
+            if not exists(morphometry_summary_path) or True:
                 self._morphometry_pipeline()
             else:
                 self._morphometry_summary = get_dataframe(
@@ -627,6 +627,12 @@ print(f"{time.time() - currtime:.3f} seconds elapsed.")
 # mesh = e.mesh
 morphometry_summary
 
+
+# %%
+morphometry_summary["n_synapses"] = 0
+for component in e.post_synapse_components:
+    if component != -1:
+        morphometry_summary.loc[component, "n_synapses"] += 1
 
 # %%
 
