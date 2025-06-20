@@ -20,12 +20,12 @@ spec:
         run: cloud-mesh # metadata label attached to pod
     spec:
       containers:
-        - image: bdpedigo/cloud-mesh:v35 # image to pull from dockerhub
+        - image: bdpedigo/cloud-mesh:v40 # image to pull from dockerhub
           name: cloud-mesh # name of container in pod
           imagePullPolicy: Always
           command: ["/bin/sh"]
           # runners/predict_synapse_compartments_2024-11-07.py
-          args: ["-c", "while true; do uv run runners/condensed_features_latest_smart.py; done"]
+          args: ["-c", "while true; do uv run runners/cloud_morphology_features.py; done"]
           # args: ["-c", "while true; do uv run runners/prediction_on_synapses.py; done"]
           env:
             - name: CLOUDSDK_CORE_PROJECT
@@ -53,7 +53,9 @@ spec:
             - name: LOGGING_LEVEL
               value: "INFO"
             - name: LEASE_SECONDS
-              value: "28800"
+              value: "1800"
+            - name: MODEL_VARIANT
+              value: "hks_model_calibrated"
 
           resources:
             requests:

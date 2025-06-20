@@ -1,11 +1,8 @@
-# %%
 import json
 import logging
 import os
-import platform
 import sys
 import traceback
-from functools import partial
 from pathlib import Path
 from typing import Any, Optional, Union
 
@@ -13,14 +10,10 @@ import attrs
 import numpy as np
 import pandas as pd
 import requests
-import toml
-import urllib3
 from cave_mapper import map_points
 from caveclient import CAVEclient, set_session_defaults
 from cloudfiles import CloudFiles
 from cloudvolume import CloudVolume
-from joblib import load
-from taskqueue import TaskQueue, queueable
 
 from cloudigo import exists, get_dataframe, put_dataframe
 from meshmash import (
@@ -40,69 +33,18 @@ from meshmash import (
     scale_mesh,
 )
 
-SYSTEM = platform.system()
-
-urllib3.disable_warnings()
-
-# suppress warnings for WARNING:urllib3.connectionpool:Connection pool is full...
-
-logging.getLogger("urllib3").setLevel(logging.CRITICAL)
-
-DATASTACK = os.environ.get("DATASTACK", "minnie65_phase3_v1")
-MODEL_NAME = os.environ.get("MODEL_NAME", "absolute-solo-yak")
-VERBOSE = str(os.environ.get("VERBOSE", "True")).lower() == "true"
-N_JOBS = int(os.environ.get("N_JOBS", -2))
-REPLICAS = int(os.environ.get("REPLICAS", 1))
-MATERIALIZATION_VERSION = int(os.environ.get("MATERIALIZATION_VERSION", 1300))
-QUEUE_NAME = os.environ.get("QUEUE_NAME", "ben-skedit")
-RUN = os.environ.get("RUN", False)
-REQUEST = os.environ.get("REQUEST", not RUN)
-LOGGING_LEVEL = os.environ.get("LOGGING_LEVEL", "ERROR")
-LEASE_SECONDS = int(os.environ.get("LEASE_SECONDS", 7200))
-RECOMPUTE = os.environ.get("RECOMPUTE", False)
 MAX_RETRIES = int(os.environ.get("MAX_RETRIES", 5))
 BACKOFF_FACTOR = int(os.environ.get("BACKOFF_FACTOR", 4))
 BACKOFF_MAX = int(os.environ.get("BACKOFF_MAX", 240))
 MAX_RUNS = int(os.environ.get("MAX_RUNS", 5))
-MODEL_VARIANT = os.environ.get("MODEL_VARIANT", "hks_model_calibrated")
-MODEL_VARIANT = "hks_binary_model_calibrated"  # for testing
-
-logging.basicConfig(level="ERROR")
-
-logging.getLogger("meshmash").setLevel(level=LOGGING_LEVEL)
-
-if SYSTEM == "Darwin":
-    root = logging.getLogger()
-    root.setLevel(logging.INFO)
-    handler = root.handlers[0]
-    formatter = logging.Formatter(
-        "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-    )
-    handler.setFormatter(formatter)
-
+VERBOSE = str(os.environ.get("VERBOSE", "True")).lower() == "false"
+N_JOBS = int(os.environ.get("N_JOBS", -2))
 
 url_path = Path("~/.cloudvolume/secrets")
 url_path = url_path / "discord-secret.json"
 
 with open(url_path.expanduser(), "r") as f:
     URL = json.load(f)["url"]
-
-
-def replace_none(parameters):
-    for key, value in parameters.items():
-        if isinstance(value, dict):
-            parameters[key] = replace_none(value)
-        elif value == "None":
-            parameters[key] = None
-    return parameters
-
-
-model_folder = Path(__file__).parent.parent / "models" / MODEL_NAME
-
-parameters = toml.load(model_folder / "parameters.toml")
-parameters = replace_none(parameters)
-
-# %%
 
 
 # decorator for protecting any method in a try/except with logging logic
@@ -127,19 +69,60 @@ def loggable(func):
 
 
 @attrs.define
-class Morphology:
+class CloudMorphology:
+    """
+    A class to represent a morphology with multiple cloud-based attributes.
+
+    Attributes
+    ----------
+    root_id :
+        The root ID of the morphology.
+    datastack :
+        The name of the datastack in CAVE.
+    version :
+        The version for querying synaptic information in CAVE.
+    parameters :
+        Dictionary of parameters for computing morphology features.
+    parameter_name :
+        The name of the parameter set used for computing morphology features.
+    model :
+        The scikit-learn model used for making synaptic label predictions.
+    model_name :
+        The name of the model used for making synaptic label predictions. Used for
+        looking up computed predictions from the cloud.
+    scale :
+        The scale factor for the morphology mesh.
+    select_label :
+        The label to select for morphometry analysis. If None, all labels are used.
+    recompute :
+        If True, recompute all features and predictions even if they already exist in
+        the cloud.
+    verbose :
+        If True, print verbose output during computation.
+    """
+
     root_id: int = attrs.field()
     datastack: str = attrs.field()
     version: int = attrs.field()
-    scale: float = attrs.field(default=1.0)
+    parameters: dict = attrs.field()
+    parameter_name: str = attrs.field()
     model: Optional[Any] = attrs.field(default=None, repr=False, init=True)
+    model_name: Optional[str] = attrs.field(default=None, repr=False, init=True)
+    scale: float = attrs.field(default=1.0)
     select_label: Optional[Union[str, int]] = attrs.field(
         default=None, repr=False, init=True
     )
+    lookup_nucleus: bool = attrs.field(default=True, repr=False, init=True)
+    recompute: bool = attrs.field(default=False, repr=False)
+    verbose: bool = attrs.field(default=False, repr=False, init=True)
+    n_jobs: int = attrs.field(default=-2, repr=False, init=True)
 
+    # depdends on datastack and parameter_name
     _path: Path = attrs.field(init=False, repr=False)
     _cf: CloudFiles = attrs.field(init=False, repr=False)
     _client: CAVEclient = attrs.field(init=False, default=None, repr=False)
+
+    # depends on root_id, datastack, scale, and parameters
     _mesh: tuple = attrs.field(init=False, default=None, repr=False)
     _pre_synapse_mapping: np.ndarray = attrs.field(init=False, default=None, repr=False)
     _post_synapse_mappings: pd.Series = attrs.field(
@@ -160,9 +143,7 @@ class Morphology:
     _condensed_posterior_entropy: pd.Series = attrs.field(
         init=False, default=None, repr=False
     )
-
-    # _mesh_predictions: Optional[np.ndarray] = attrs.field(init=False, default=None, repr=False)
-    _synapse_prediction_summary: pd.DataFrame = attrs.field(
+    _post_synapse_predictions: pd.DataFrame = attrs.field(
         init=False, default=None, repr=False
     )
     _morphometry_summary: pd.DataFrame = attrs.field(
@@ -171,10 +152,35 @@ class Morphology:
     _components: np.ndarray = attrs.field(init=False, default=None, repr=False)
 
     def __attrs_post_init__(self):
-        path = Path(f"gs://bdp-ssa//{self.datastack}/{MODEL_NAME}")
+        path = Path(f"gs://bdp-ssa//{self.datastack}/{self.parameter_name}")
         self._path = path
         cf, _ = interpret_path(path)
         self._cf = cf
+
+    # @property
+    # def root_id(self):
+    #     return self._root_id
+
+    # @root_id.setter
+    # def root_id(self, value):
+    #     if not isinstance(value, int):
+    #         raise ValueError("root_id must be an integer")
+    #     self._root_id = value
+    #     self._mesh = None
+    #     self._pre_synapse_mapping = None
+    #     self._post_synapse_mappings = None
+    #     self._nuc_point = None
+    #     self._checked_nuc_point = False
+    #     self._labels = None
+    #     self._condensed_features = None
+    #     self._condensed_nodes = None
+    #     self._condensed_edges = None
+    #     self._condensed_posteriors = None
+    #     self._condensed_predictions = None
+    #     self._condensed_posterior_entropy = None
+    #     self._post_synapse_predictions = None
+    #     self._morphometry_summary = None
+    #     self._components = None
 
     @property
     def client(self):
@@ -188,6 +194,7 @@ class Morphology:
                 max_retries=MAX_RETRIES,
                 backoff_factor=BACKOFF_FACTOR,
                 backoff_max=BACKOFF_MAX,
+                status_forcelist=(502, 503, 504),
             )
             self._client = CAVEclient(self.datastack)
             return self._client
@@ -212,7 +219,9 @@ class Morphology:
                 raw_mesh = (raw_mesh.vertices, raw_mesh.faces)
             else:
                 cv = client.info.segmentation_cloudvolume(progress=False)
-                raw_mesh = cv.mesh.get(root_id, **parameters["cv-mesh-get"])[root_id]
+                raw_mesh = cv.mesh.get(root_id, **self.parameters["cv-mesh-get"])[
+                    root_id
+                ]
                 raw_mesh = (raw_mesh.vertices, raw_mesh.faces)
             logging.info(
                 f"Loaded mesh for {root_id}, has {raw_mesh[0].shape[0]} vertices"
@@ -235,7 +244,7 @@ class Morphology:
                 self._path / "pre-synapse-mappings" / f"{root_id}.npz"
             )
 
-            if not exists(pre_synapse_mapping_file) or RECOMPUTE:
+            if not exists(pre_synapse_mapping_file) or self.recompute:
                 logging.info(
                     f"Searched for pre-synapse mapping at {pre_synapse_mapping_file}"
                 )
@@ -246,7 +255,7 @@ class Morphology:
                     client,
                     version=self.version,
                     side="pre",
-                    **parameters["project_points_to_mesh"],
+                    **self.parameters["project_points_to_mesh"],
                 )
                 save_id_to_mesh_map(pre_synapse_mapping_file, pre_synapse_mapping)
                 logging.info(
@@ -270,7 +279,7 @@ class Morphology:
                 self._path / "post-synapse-mappings" / f"{root_id}.npz"
             )
 
-            if not exists(post_synapse_mappings_file) or RECOMPUTE:
+            if not exists(post_synapse_mappings_file) or self.recompute:
                 logging.info(
                     f"Searched for post-synapse mapping at {post_synapse_mappings_file}"
                 )
@@ -281,7 +290,7 @@ class Morphology:
                     client,
                     version=self.version,
                     side="post",
-                    **parameters["project_points_to_mesh"],
+                    **self.parameters["project_points_to_mesh"],
                 )
                 save_id_to_mesh_map(post_synapse_mappings_file, post_synapse_mappings)
                 logging.info(
@@ -298,7 +307,11 @@ class Morphology:
     @property
     @loggable
     def nuc_point(self):
-        if self._nuc_point is None and not self._checked_nuc_point:
+        if (
+            self._nuc_point is None
+            and not self._checked_nuc_point
+            and self.lookup_nucleus
+        ):
             root_id = self.root_id
             client = self.client
 
@@ -320,8 +333,8 @@ class Morphology:
     def _hks_pipeline(self):
         mesh = self.mesh
         nuc_point = self.nuc_point
-        verbose = VERBOSE
-        n_jobs = N_JOBS
+        verbose = self.verbose
+        n_jobs = self.n_jobs
         path = self._path
         scale = self.scale
         root_id = self.root_id
@@ -331,7 +344,7 @@ class Morphology:
             nuc_point=nuc_point,
             verbose=verbose,
             n_jobs=n_jobs,
-            **parameters["condensed_hks_pipeline"],
+            **self.parameters["condensed_hks_pipeline"],
         )
         labels = result.labels
         condensed_features = result.condensed_features
@@ -346,7 +359,7 @@ class Morphology:
             out_file,
             condensed_features,
             labels,
-            **parameters["save_condensed_features"],
+            **self.parameters["save_condensed_features"],
         )
         logging.info(f"Saved features for {root_id}")
         self._condensed_features = condensed_features
@@ -359,7 +372,7 @@ class Morphology:
                 graph_file,
                 result.condensed_nodes,
                 result.condensed_edges,
-                **parameters["save_condensed_graph"],
+                **self.parameters["save_condensed_graph"],
             )
             logging.info(f"Saved edges for {root_id}")
 
@@ -370,7 +383,7 @@ class Morphology:
     def labels(self):
         if self._labels is None:
             feature_file = self._path / "features" / f"{self.root_id}.npz"
-            if not exists(feature_file) or RECOMPUTE:
+            if not exists(feature_file) or self.recompute:
                 self._hks_pipeline()
             else:
                 features, labels = read_condensed_features(feature_file)
@@ -382,7 +395,7 @@ class Morphology:
     def condensed_features(self):
         if self._condensed_features is None:
             feature_file = self._path / "features" / f"{self.root_id}.npz"
-            if not exists(feature_file) or RECOMPUTE:
+            if not exists(feature_file) or self.recompute:
                 self._hks_pipeline()
             else:
                 features, _ = read_condensed_features(feature_file)
@@ -393,7 +406,7 @@ class Morphology:
     def condensed_nodes(self):
         if self._condensed_nodes is None:
             graph_file = self._path / "graphs" / f"{self.root_id}.npz"
-            if not exists(graph_file) or RECOMPUTE:
+            if not exists(graph_file) or self.recompute:
                 self._hks_pipeline()
             else:
                 _, nodes, edges = read_condensed_graph(graph_file)
@@ -405,7 +418,7 @@ class Morphology:
     def condensed_edges(self):
         if self._condensed_edges is None:
             graph_file = self._path / "graphs" / f"{self.root_id}.npz"
-            if not exists(graph_file) or RECOMPUTE:
+            if not exists(graph_file) or self.recompute:
                 self._hks_pipeline()
             else:
                 _, nodes, edges = read_condensed_graph(graph_file)
@@ -503,24 +516,24 @@ class Morphology:
         synapse_prediction_summary.rename_axis("id", inplace=True)
         synapse_prediction_summary.dropna(how="any", inplace=True)
 
-        synapse_prediction_path = f"gs://bdp-ssa/{datastack}/{PARAMETER_NAME}/post-synapse-predictions/{root_id}.csv.gz"
+        synapse_prediction_path = f"gs://bdp-ssa/{datastack}/{self.parameter_name}/post-synapse-predictions/{root_id}.csv.gz"
         put_dataframe(synapse_prediction_summary, synapse_prediction_path)
 
-        self._synapse_prediction_summary = synapse_prediction_summary
+        self._post_synapse_predictions = synapse_prediction_summary
 
     @property
-    def synapse_prediction_summary(self):
-        if self._synapse_prediction_summary is None:
+    def post_synapse_predictions(self):
+        if self._post_synapse_predictions is None:
             synapse_prediction_path = (
                 self._path / "post-synapse-predictions" / f"{self.root_id}.csv.gz"
             )
             if not exists(synapse_prediction_path) or True:
                 self._post_target_prediction()
             else:
-                self._synapse_prediction_summary = get_dataframe(
+                self._post_synapse_predictions = get_dataframe(
                     synapse_prediction_path, index_col=0
                 )
-        return self._synapse_prediction_summary
+        return self._post_synapse_predictions
 
     @loggable
     def _morphometry_pipeline(self):
@@ -572,7 +585,7 @@ class Morphology:
             self._path / f"{self.select_label}-morphometry" / f"{self.root_id}.csv.gz"
         )
         if self._morphometry_summary is None:
-            if not exists(morphometry_summary_path) or RECOMPUTE:
+            if not exists(morphometry_summary_path) or self.recompute:
                 self._morphometry_pipeline()
             else:
                 self._morphometry_summary = get_dataframe(
@@ -588,7 +601,7 @@ class Morphology:
             / f"{self.root_id}.npz"
         )
         if self._components is None:
-            if not exists(component_path) or RECOMPUTE:
+            if not exists(component_path) or self.recompute:
                 self._morphometry_pipeline()
             else:
                 self._components = read_array(component_path)
@@ -598,215 +611,3 @@ class Morphology:
     def post_synapse_components(self):
         out = self.components[self.post_synapse_mappings]
         return out
-
-
-@queueable
-def run_for_root(
-    root_id: int,
-    datastack: str,
-    version: int,
-):
-    morph = Morphology(root_id, datastack, version, model=model, select_label="spine")
-    morph.morphometry_summary
-    morph.synapse_prediction_summary
-    return True
-
-
-PARAMETER_NAME = "absolute-solo-yak"
-model_folder = Path(__file__).parent.parent / "models" / PARAMETER_NAME
-model_path = model_folder / f"{MODEL_VARIANT}.joblib"
-model = load(model_path)
-
-# %%
-
-
-tq = TaskQueue(f"https://sqs.us-west-2.amazonaws.com/629034007606/{QUEUE_NAME}")
-
-
-def stop_fn(executed):
-    if executed >= MAX_RUNS:
-        quit()
-
-
-if RUN:
-    tq.poll(lease_seconds=LEASE_SECONDS, verbose=False, tally=False, stop_fn=stop_fn)
-
-# %%
-
-
-if REQUEST:
-    import pandas as pd
-    from cloudfiles import CloudFiles
-
-    tasks = []
-    if False:
-        cell_table = pd.read_feather(
-            "/Users/ben.pedigo/code/meshrep/cloud-mesh/data/v1dd_single_neuron_soma_ids.feather"
-        )
-
-        root_ids = np.unique(cell_table["pt_root_id"])
-
-        cf = CloudFiles(f"gs://bdp-ssa/v1dd/{MODEL_NAME}")
-        done_files = list(cf.list("features"))
-        done_roots = [
-            int(file.split("/")[-1].split(".")[0])
-            for file in done_files
-            if file.endswith(".npz")
-        ]
-        root_ids = np.setdiff1d(root_ids, done_roots)
-
-        tasks += [partial(run_for_root, root_id, "v1dd", 974) for root_id in root_ids]
-
-    if True:
-        datastack = "minnie65_phase3_v1"
-        version = 1412
-        client = CAVEclient(datastack_name=datastack, version=version)
-
-        # NOTE: this was for getting cells with labels in my training set
-        # table = pd.read_csv(
-        #     "/Users/ben.pedigo/code/meshrep/meshrep/experiments/cautious-fig-thaw/labels.csv"
-        # )
-        # root_ids = table["pt_root_id"].unique()
-
-        # NOTE: this was for getting all cells in the column
-        table = (
-            client.materialize.query_table("allen_v1_column_types_slanted_ref")
-            .drop_duplicates("pt_root_id", keep=False)
-            .query("pt_root_id != 0")
-            .set_index("pt_root_id")
-        )
-
-        # NOTE: this was for getting all putative neurons
-        # table = (
-        #     client.materialize.query_view("""aibs_cell_info""")
-        #     .drop_duplicates("pt_root_id", keep=False)
-        #     .set_index("pt_root_id")
-        #     .query("broad_type == 'excitatory' or broad_type == 'inhibitory'")
-        #     .query("pt_root_id != 0")
-        # )
-
-        # NOTE: this was for getting column inputs at 1412
-        # table = (
-        #     pd.read_csv("meshrep/data/random/synapses_onto_column_count_1412.csv")
-        #     .set_index("pre_pt_root_id")
-        #     .query("synapse_onto_column_count_1412 >= 3")
-        # )
-        root_ids = table.index.unique()
-        tasks += [
-            partial(run_for_root, root_id, datastack, 1412) for root_id in root_ids
-        ]
-
-        # NOTE: this was for getting column inputs at 117
-        # table = (
-        #     pd.read_csv(
-        #         "/Users/ben.pedigo/code/meshrep/meshrep/data/random/old_pre_status.csv"
-        #     )
-        #     .set_index("old_pre_pt_root_id")
-        #     .query("(synapse_onto_column_count_1412 >= 3) and (is_latest_at_117)")
-        # )
-        # root_ids = table.index.unique()
-        # tasks += [
-        #     partial(run_for_root, root_id, datastack, 117, track_synapses="both")
-        #     for root_id in root_ids
-        # ]
-
-    if False:
-        datastack = "zheng_ca3"
-        version = 195
-        table = pd.read_csv(
-            "/Users/ben.pedigo/code/meshrep/cloud-mesh/data/zheng_ca3/updated_segids_20250423_manual.csv",
-            index_col=0,
-        )
-        root_ids = table["seg_m195_20250423"].unique()
-
-        # tasks += [
-        #     partial(
-        #         run_for_root,
-        #         root_id,
-        #         datastack,
-        #         version,
-        #         scale=1.0,
-        #         track_synapses=False,
-        #     )
-        #     for root_id in root_ids
-        # ]
-        tasks += [
-            partial(
-                run_for_root,
-                root_id,
-                datastack,
-                version,
-            )
-            for root_id in root_ids
-        ]
-
-    if len(tasks) > 0:
-        tq.insert(tasks)
-
-    # data_folder = Path(__file__).parent.parent / "data"
-
-    # labels_df = pd.read_csv(data_folder / "unified_labels.csv")
-    # labels_df.query("source == 'vortex_compartment_targets'", inplace=True)
-    # root_ids = labels_df["root_id"].unique().tolist()
-    # custom_roots = [
-    #     864691135494786192,
-    #     864691135851320007,
-    #     864691135940636929,
-    #     864691137198691137,
-    # ]
-    # root_ids += custom_roots
-    # request_table = client.materialize.query_table("allen_v1_column_types_slanted_ref")
-    # root_ids += (
-    #     request_table.query("pt_root_id != 0")
-    #     .drop_duplicates("pt_root_id", keep=False)["pt_root_id"]
-    #     .unique()
-    #     .tolist()
-    # )
-
-    #
-
-
-# %%
-# root_id = root_ids[0]
-# run_for_root(root_id, datastack, 1412)
-datastack = "zheng_ca3"
-version = 195
-table = pd.read_csv(
-    "/Users/ben.pedigo/code/meshrep/cloud-mesh/data/zheng_ca3/updated_segids_20250423_manual.csv",
-    index_col=0,
-)
-root_ids = table["seg_m195_20250423"].unique()
-
-
-def run_for_root(
-    root_id: int,
-    datastack: str,
-    version: int,
-):
-    morph = Morphology(root_id, datastack, version, model=model, select_label="spine")
-    morph.synapse_prediction_summary
-    return True
-
-
-# for root_id in tqdm(root_ids):
-#     run_for_root(root_id, datastack, version)
-# %%
-from joblib import Parallel, delayed
-from tqdm_joblib import tqdm_joblib
-
-with tqdm_joblib(total=len(root_ids)):
-    results = Parallel(n_jobs=N_JOBS, verbose=False)(
-        delayed(run_for_root)(root_id, datastack, version) for root_id in root_ids
-    )
-# %%
-# tasks += [
-#     partial(
-#         run_for_root,
-#         root_id,
-#         datastack,
-#         version,
-#     )
-#     for root_id in root_ids
-# ]
-
-# %%

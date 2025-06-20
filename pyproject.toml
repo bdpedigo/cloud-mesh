@@ -18,7 +18,11 @@ readme = "README.md"
 requires-python = ">=3.12,<3.13"
 version = "0.1.0"
 
+[build-system]
+build-backend = "hatchling.build"
+requires = ["hatchling"]
+
 [tool.uv.sources]
-cloudigo = { path = "../cloudigo", editable = true }
 cave-mapper = { path = "../cave-mapper", editable = true }
+cloudigo = { path = "../cloudigo", editable = true }
 meshmash = { path = "../meshmash", editable = true }

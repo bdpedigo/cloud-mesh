@@ -2,7 +2,7 @@
 FROM python:3.12-slim-bookworm
 
 # Install git
-RUN apt update
+RUN apt update 
 # RUN apt install -y git
 RUN apt-get update && apt-get install -y build-essential
 
@@ -19,6 +19,7 @@ COPY ./cloud-mesh/pyproject.toml /app/cloud-mesh/pyproject.toml
 COPY ./cloud-mesh/README.md /app/cloud-mesh/README.md
 COPY ./cloud-mesh/runners /app/cloud-mesh/runners
 COPY ./cloud-mesh/models /app/cloud-mesh/models
+COPY ./cloud-mesh/src /app/cloud-mesh/src
 WORKDIR /app/cloud-mesh
 
 # RUN echo "meshrep" > /app/.uvignore
@@ -42,4 +43,4 @@ ENV RUN='True'
 ENV TEST_RUN='False'
 ENV REQUEST='False'
 
-CMD ["uv", "run", "runners/condensed_features_latest_smart.py"]
+CMD ["uv", "run", "runners/cloud_morphology_features.py"]
