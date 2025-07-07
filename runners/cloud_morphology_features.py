@@ -12,6 +12,7 @@ import toml
 import urllib3
 from cloud_mesh import CloudMorphology
 from cloudfiles import CloudFiles
+from joblib import load
 from taskqueue import TaskQueue, queueable
 
 SYSTEM = platform.system()
@@ -20,7 +21,7 @@ urllib3.disable_warnings()
 
 # suppress warnings for WARNING:urllib3.connectionpool:Connection pool is full...
 
-# logging.getLogger("urllib3").setLevel(logging.CRITICAL)
+logging.getLogger("urllib3").setLevel(logging.CRITICAL)
 
 MODEL_NAME = os.environ.get("MODEL_NAME", "absolute-solo-yak")
 VERBOSE = str(os.environ.get("VERBOSE", "True")).lower() == "true"
@@ -75,9 +76,9 @@ parameters = toml.load(model_folder / "parameters.toml")
 parameters = replace_none(parameters)
 PARAMETER_NAME = "absolute-solo-yak"
 
-# model_folder = Path(__file__).parent.parent / "models" / PARAMETER_NAME
-# model_path = model_folder / f"{MODEL_VARIANT}.joblib"
-# model = load(model_path)
+model_folder = Path(__file__).parent.parent / "models" / PARAMETER_NAME
+model_path = model_folder / f"{MODEL_VARIANT}.joblib"
+model = load(model_path)
 
 
 # %%
@@ -95,7 +96,7 @@ def run_for_root(
         version=version,
         datastack=datastack,
         model_name=MODEL_VARIANT,
-        # model=model,
+        model=model,
         parameters=parameters,
         parameter_name=PARAMETER_NAME,
         select_label="spine",
@@ -160,6 +161,7 @@ if RUN:
 
 if REQUEST:
     import pandas as pd
+    from caveclient import CAVEclient
     from cloudfiles import CloudFiles
 
     tasks = []
@@ -180,6 +182,29 @@ if REQUEST:
         root_ids = np.setdiff1d(root_ids, done_roots)
 
         tasks += [partial(run_for_root, root_id, "v1dd", 974) for root_id in root_ids]
+
+    if True:
+        version = 1154
+        datastack = "v1dd"
+        client = CAVEclient(datastack_name=datastack, version=version)
+
+        neuron_table = client.materialize.query_table("neurons_soma_model")
+        neuron_table = (
+            neuron_table.drop_duplicates("pt_root_id", keep=False)
+            .query("pt_root_id != 0")
+            .set_index("pt_root_id")
+        )
+        root_ids = neuron_table.index.unique()
+        root_ids = np.random.permutation(root_ids)
+        tasks += [
+            partial(
+                run_for_root,
+                root_id,
+                datastack,
+                version,
+            )
+            for root_id in root_ids
+        ]
 
     if False:
         datastack = "minnie65_phase3_v1"
@@ -282,7 +307,7 @@ if REQUEST:
             for root_id in root_ids
         ]
 
-    if len(tasks) > 0 and False:
+    if len(tasks) > 0:
         tq.insert(tasks)
 
     # data_folder = Path(__file__).parent.parent / "data"
@@ -305,7 +330,6 @@ if REQUEST:
     #     .tolist()
     # )
 
-    #
 
 # %%
 # run_for_root(root_ids[-1], 'minnie65_phase3_v1', 1412)
@@ -345,69 +369,10 @@ if REQUEST:
 # ]
 
 # %%
-from joblib import load
+# from joblib import load
 
-model_folder = Path(__file__).parent.parent / "models" / PARAMETER_NAME
-model_path = model_folder / f"{MODEL_VARIANT}.joblib"
-model = load(model_path)
-
-# %%
-cell_table = pd.read_feather(
-    "/Users/ben.pedigo/code/meshrep/cloud-mesh/data/v1dd_single_neuron_soma_ids.feather"
-)
-root_ids = np.unique(cell_table["pt_root_id"])
-
-root_id = root_ids[-12]
-datastack = "v1dd"
-version = 974
-morphology = CloudMorphology(
-    root_id=root_id,
-    version=version,
-    datastack=datastack,
-    model_name=MODEL_VARIANT,
-    model=model,
-    parameters=parameters,
-    parameter_name=PARAMETER_NAME,
-    select_label="spine",
-    lookup_nucleus=False,
-    recompute=False,
-    verbose=True,
-    prediction_schema="new",
-    n_jobs=-1,
-)
-
-morphology.morphometry_summary
-morphology.post_synapse_predictions
+# model_folder = Path(__file__).parent.parent / "models" / PARAMETER_NAME
+# model_path = model_folder / f"{MODEL_VARIANT}.joblib"
+# model = load(model_path)
 
 # %%
-from caveclient import CAVEclient
-
-version = 1154
-
-client = CAVEclient(datastack_name=datastack, version=version)
-
-neuron_table = client.materialize.query_table("neurons_soma_model")
-
-
-# %%
-
-import pyvista as pv
-
-plotter = pv.Plotter()
-
-mesh = morphology.mesh
-
-plotter.add_mesh(
-    pv.make_tri_mesh(*mesh),
-    opacity=0.5,
-)
-plotter.add_points(
-    morphology.morphometry_summary[["x", "y", "z"]].values,
-    render_points_as_spheres=True,
-    point_size=5,
-    scalars=morphology.morphometry_summary["n_post_synapses"].values,
-    # scalars=np.log(morphology.morphometry_summary["size_nm3"].values),
-)
-plotter.enable_fly_to_right_click()
-
-plotter.show()

@@ -20,7 +20,7 @@ spec:
         run: cloud-mesh # metadata label attached to pod
     spec:
       containers:
-        - image: bdpedigo/cloud-mesh:v49 # image to pull from dockerhub
+        - image: bdpedigo/cloud-mesh:v50 # image to pull from dockerhub
           name: cloud-mesh # name of container in pod
           imagePullPolicy: Always
           command: ["/bin/sh"]
@@ -53,7 +53,7 @@ spec:
             - name: LOGGING_LEVEL
               value: "INFO"
             - name: LEASE_SECONDS
-              value: "3600"
+              value: "7200"
             - name: MODEL_VARIANT
               value: "hks_model_calibrated"
             - name: RECOMPUTE
