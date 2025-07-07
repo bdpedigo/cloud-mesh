@@ -13,7 +13,7 @@ gcloud config set project exalted-beanbag-334502
 # num-nodes: The number of nodes to be created in each of the cluster's zones.
 # --machine-type "c2d-standard-32" \
 # gcloud container --project "exalted-beanbag-334502" clusters delete "cloud-mesh" --zone "us-west1-b"
-gcloud container --project "exalted-beanbag-334502" clusters create "cloud-mesh-32x4" \
+gcloud container --project "exalted-beanbag-334502" clusters create "cloud-mesh-32x16" \
     --zone "us-west1-b" \
     --no-enable-basic-auth \
     --release-channel "stable" \
@@ -24,7 +24,7 @@ gcloud container --project "exalted-beanbag-334502" clusters create "cloud-mesh-
     --metadata disable-legacy-endpoints=true \
     --scopes "https://www.googleapis.com/auth/devstorage.read_only","https://www.googleapis.com/auth/logging.write","https://www.googleapis.com/auth/monitoring","https://www.googleapis.com/auth/servicecontrol","https://www.googleapis.com/auth/service.management.readonly","https://www.googleapis.com/auth/trace.append" \
     --preemptible \
-    --num-nodes "4" \
+    --num-nodes "16" \
     --logging=SYSTEM,WORKLOAD \
     --monitoring=SYSTEM \
     --enable-ip-alias \
@@ -40,7 +40,7 @@ gcloud container --project "exalted-beanbag-334502" clusters create "cloud-mesh-
     --enable-shielded-nodes \
     --node-locations "us-west1-b"
 
-gcloud container clusters get-credentials --zone us-west1-b cloud-mesh-32x4
+gcloud container clusters get-credentials --zone us-west1-b cloud-mesh-32x16
 
 # https://kubernetes.io/docs/concepts/configuration/secret/
 kubectl create secret generic secrets \
@@ -52,4 +52,4 @@ kubectl create secret generic secrets \
     --from-file=$HOME/.cloudvolume/secrets/cave_datastack_to_server_map.json \
     --from-file=$HOME/.cloudvolume/secrets/globalv1.em.brain.allentech.org-cave-secret.json \
 
-kubectl apply -f kube-task.yml
+# kubectl apply -f kube-task.yml

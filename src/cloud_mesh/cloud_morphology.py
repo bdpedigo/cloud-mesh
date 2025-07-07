@@ -104,7 +104,7 @@ class CloudMorphology:
     root_id: int = attrs.field()
     datastack: str = attrs.field()
     version: int = attrs.field()
-    parameters: dict = attrs.field()
+    parameters: dict = attrs.field(repr=False)
     parameter_name: str = attrs.field()
     model: Optional[Any] = attrs.field(default=None, repr=False, init=True)
     model_name: Optional[str] = attrs.field(default=None, repr=False, init=True)
@@ -112,10 +112,11 @@ class CloudMorphology:
     select_label: Optional[Union[str, int]] = attrs.field(
         default=None, repr=False, init=True
     )
+    prediction_schema: str = attrs.field(default="old", repr=True, init=True)
     lookup_nucleus: bool = attrs.field(default=True, repr=False, init=True)
-    recompute: bool = attrs.field(default=False, repr=False)
-    verbose: bool = attrs.field(default=False, repr=False, init=True)
-    n_jobs: int = attrs.field(default=-2, repr=False, init=True)
+    recompute: bool = attrs.field(default=False, repr=True)
+    verbose: bool = attrs.field(default=False, repr=True, init=True)
+    n_jobs: int = attrs.field(default=-2, repr=True, init=True)
 
     # depdends on datastack and parameter_name
     _path: Path = attrs.field(init=False, repr=False)
@@ -124,7 +125,9 @@ class CloudMorphology:
 
     # depends on root_id, datastack, scale, and parameters
     _mesh: tuple = attrs.field(init=False, default=None, repr=False)
-    _pre_synapse_mapping: np.ndarray = attrs.field(init=False, default=None, repr=False)
+    _pre_synapse_mappings: np.ndarray = attrs.field(
+        init=False, default=None, repr=False
+    )
     _post_synapse_mappings: pd.Series = attrs.field(
         init=False, default=None, repr=False
     )
@@ -151,36 +154,51 @@ class CloudMorphology:
     )
     _components: np.ndarray = attrs.field(init=False, default=None, repr=False)
 
+    # Paths
+    _post_synapse_target_path: Path = attrs.field(init=False, repr=False)
+    _morpohmetry_summary_path: Path = attrs.field(init=False, repr=False)
+    _component_path: Path = attrs.field(init=False, repr=False)
+
     def __attrs_post_init__(self):
         path = Path(f"gs://bdp-ssa//{self.datastack}/{self.parameter_name}")
         self._path = path
         cf, _ = interpret_path(path)
         self._cf = cf
 
-    # @property
-    # def root_id(self):
-    #     return self._root_id
+        if self.prediction_schema == "new":
+            self._post_synapse_target_path = (
+                self._path
+                / self.model_name
+                / "post-synapse-predictions"
+                / f"{self.root_id}.csv.gz"
+            )
+            self._morpohmetry_summary_path = (
+                self._path
+                / self.model_name
+                / f"{self.select_label}-morphometry"
+                / f"{self.root_id}.csv.gz"
+            )
+            self._component_path = (
+                self._path
+                / self.model_name
+                / f"{self.select_label}-component-mappings"
+                / f"{self.root_id}.npz"
+            )
 
-    # @root_id.setter
-    # def root_id(self, value):
-    #     if not isinstance(value, int):
-    #         raise ValueError("root_id must be an integer")
-    #     self._root_id = value
-    #     self._mesh = None
-    #     self._pre_synapse_mapping = None
-    #     self._post_synapse_mappings = None
-    #     self._nuc_point = None
-    #     self._checked_nuc_point = False
-    #     self._labels = None
-    #     self._condensed_features = None
-    #     self._condensed_nodes = None
-    #     self._condensed_edges = None
-    #     self._condensed_posteriors = None
-    #     self._condensed_predictions = None
-    #     self._condensed_posterior_entropy = None
-    #     self._post_synapse_predictions = None
-    #     self._morphometry_summary = None
-    #     self._components = None
+        else:
+            self._post_synapse_target_path = (
+                self._path / "post-synapse-predictions" / f"{self.root_id}.csv.gz"
+            )
+            self._morpohmetry_summary_path = (
+                self._path
+                / f"{self.select_label}-morphometry"
+                / f"{self.root_id}.csv.gz"
+            )
+            self._component_path = (
+                self._path
+                / f"{self.select_label}-component-mappings"
+                / f"{self.root_id}.npz"
+            )
 
     @property
     def client(self):
@@ -194,7 +212,7 @@ class CloudMorphology:
                 max_retries=MAX_RETRIES,
                 backoff_factor=BACKOFF_FACTOR,
                 backoff_max=BACKOFF_MAX,
-                status_forcelist=(502, 503, 504),
+                status_forcelist=(500, 501, 502, 503, 504),
             )
             self._client = CAVEclient(self.datastack)
             return self._client
@@ -235,21 +253,21 @@ class CloudMorphology:
 
     @property
     @loggable
-    def pre_synapse_mapping(self):
-        if self._pre_synapse_mapping is None:
+    def pre_synapse_mappings(self) -> pd.Series:
+        if self._pre_synapse_mappings is None:
             root_id = self.root_id
             client = self.client
 
-            pre_synapse_mapping_file = (
+            pre_synapse_mappings_file = (
                 self._path / "pre-synapse-mappings" / f"{root_id}.npz"
             )
 
-            if not exists(pre_synapse_mapping_file) or self.recompute:
+            if not exists(pre_synapse_mappings_file) or self.recompute:
                 logging.info(
-                    f"Searched for pre-synapse mapping at {pre_synapse_mapping_file}"
+                    f"Searched for pre-synapse mapping at {pre_synapse_mappings_file}"
                 )
                 logging.info(f"Pre-synapse mapping not found for {root_id}")
-                pre_synapse_mapping = get_synapse_mapping(
+                pre_synapse_mappings = get_synapse_mapping(
                     root_id,
                     self.mesh,
                     client,
@@ -257,20 +275,22 @@ class CloudMorphology:
                     side="pre",
                     **self.parameters["project_points_to_mesh"],
                 )
-                save_id_to_mesh_map(pre_synapse_mapping_file, pre_synapse_mapping)
+                save_id_to_mesh_map(pre_synapse_mappings_file, pre_synapse_mappings)
                 logging.info(
-                    f"Saved {len(pre_synapse_mapping)} synapse mappings for {root_id}"
+                    f"Saved {len(pre_synapse_mappings)} synapse mappings for {root_id}"
                 )
-                return pre_synapse_mapping
+                return pre_synapse_mappings
             else:
-                self._pre_synapse_mapping = read_id_to_mesh_map(
-                    pre_synapse_mapping_file
-                )
-        return self._pre_synapse_mapping
+                pre_synapse_mappings = read_id_to_mesh_map(pre_synapse_mappings_file)
+            pre_synapse_mappings = pd.Series(
+                index=pre_synapse_mappings[:, 0], data=pre_synapse_mappings[:, 1]
+            )
+            self._pre_synapse_mappings = pre_synapse_mappings
+        return self._pre_synapse_mappings
 
     @property
     @loggable
-    def post_synapse_mappings(self):
+    def post_synapse_mappings(self) -> pd.Series:
         if self._post_synapse_mappings is None:
             root_id = self.root_id
             client = self.client
@@ -306,7 +326,7 @@ class CloudMorphology:
 
     @property
     @loggable
-    def nuc_point(self):
+    def nuc_point(self) -> Optional[np.ndarray]:
         if (
             self._nuc_point is None
             and not self._checked_nuc_point
@@ -380,7 +400,7 @@ class CloudMorphology:
             self._condensed_edges = result.condensed_edges
 
     @property
-    def labels(self):
+    def labels(self) -> np.ndarray:
         if self._labels is None:
             feature_file = self._path / "features" / f"{self.root_id}.npz"
             if not exists(feature_file) or self.recompute:
@@ -392,7 +412,7 @@ class CloudMorphology:
         return self._labels
 
     @property
-    def condensed_features(self):
+    def condensed_features(self) -> pd.DataFrame:
         if self._condensed_features is None:
             feature_file = self._path / "features" / f"{self.root_id}.npz"
             if not exists(feature_file) or self.recompute:
@@ -403,7 +423,7 @@ class CloudMorphology:
         return self._condensed_features
 
     @property
-    def condensed_nodes(self):
+    def condensed_nodes(self) -> pd.DataFrame:
         if self._condensed_nodes is None:
             graph_file = self._path / "graphs" / f"{self.root_id}.npz"
             if not exists(graph_file) or self.recompute:
@@ -415,7 +435,7 @@ class CloudMorphology:
         return self._condensed_nodes
 
     @property
-    def condensed_edges(self):
+    def condensed_edges(self) -> pd.DataFrame:
         if self._condensed_edges is None:
             graph_file = self._path / "graphs" / f"{self.root_id}.npz"
             if not exists(graph_file) or self.recompute:
@@ -427,7 +447,7 @@ class CloudMorphology:
         return self._condensed_edges
 
     @loggable
-    def _condensed_prediction(self):
+    def _condensed_prediction(self) -> None:
         condensed_features = self.condensed_features
         model = self.model
 
@@ -516,7 +536,10 @@ class CloudMorphology:
         synapse_prediction_summary.rename_axis("id", inplace=True)
         synapse_prediction_summary.dropna(how="any", inplace=True)
 
-        synapse_prediction_path = f"gs://bdp-ssa/{datastack}/{self.parameter_name}/post-synapse-predictions/{root_id}.csv.gz"
+        if self.prediction_schema == "new":
+            synapse_prediction_path = f"gs://bdp-ssa/{datastack}/{self.parameter_name}/{self.model_name}/post-synapse-predictions/{root_id}.csv.gz"
+        else:
+            synapse_prediction_path = f"gs://bdp-ssa/{datastack}/{self.parameter_name}/post-synapse-predictions/{root_id}.csv.gz"
         put_dataframe(synapse_prediction_summary, synapse_prediction_path)
 
         self._post_synapse_predictions = synapse_prediction_summary
@@ -524,10 +547,18 @@ class CloudMorphology:
     @property
     def post_synapse_predictions(self):
         if self._post_synapse_predictions is None:
-            synapse_prediction_path = (
-                self._path / "post-synapse-predictions" / f"{self.root_id}.csv.gz"
-            )
-            if not exists(synapse_prediction_path) or True:
+            if self.prediction_schema == "new":
+                synapse_prediction_path = (
+                    self._path
+                    / self.model_name
+                    / "post-synapse-predictions"
+                    / f"{self.root_id}.csv.gz"
+                )
+            else:
+                synapse_prediction_path = (
+                    self._path / "post-synapse-predictions" / f"{self.root_id}.csv.gz"
+                )
+            if not exists(synapse_prediction_path) or self.recompute:
                 self._post_target_prediction()
             else:
                 self._post_synapse_predictions = get_dataframe(
@@ -562,18 +593,10 @@ class CloudMorphology:
             how="left",
         )
 
-        put_dataframe(
-            morphometry_summary,
-            self._path / f"{self.select_label}-morphometry" / f"{self.root_id}.csv.gz",
-        )
+        put_dataframe(morphometry_summary, self._morpohmetry_summary_path)
 
-        component_mapping_path = (
-            self._path
-            / f"{self.select_label}-component-mappings"
-            / f"{self.root_id}.npz"
-        )
         save_array(
-            component_mapping_path,
+            self._component_path,
             components,
         )
         self._morphometry_summary = morphometry_summary
@@ -581,9 +604,7 @@ class CloudMorphology:
 
     @property
     def morphometry_summary(self):
-        morphometry_summary_path = (
-            self._path / f"{self.select_label}-morphometry" / f"{self.root_id}.csv.gz"
-        )
+        morphometry_summary_path = self._morpohmetry_summary_path
         if self._morphometry_summary is None:
             if not exists(morphometry_summary_path) or self.recompute:
                 self._morphometry_pipeline()
@@ -595,11 +616,7 @@ class CloudMorphology:
 
     @property
     def components(self):
-        component_path = (
-            self._path
-            / f"{self.select_label}-component-mappings"
-            / f"{self.root_id}.npz"
-        )
+        component_path = self._component_path
         if self._components is None:
             if not exists(component_path) or self.recompute:
                 self._morphometry_pipeline()
