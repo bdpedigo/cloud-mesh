@@ -573,7 +573,7 @@ class CloudMorphology:
             self.mesh_predictions,
             select_label=self.select_label,
             post_synapse_mappings=self.post_synapse_mappings,
-            verbose=VERBOSE,
+            verbose=self.verbose,
         )
 
         points = morphometry_summary[["x", "y", "z"]].values
@@ -585,7 +585,7 @@ class CloudMorphology:
             self.client,
             initial_distance=0,
             max_distance=4,
-            verbose=VERBOSE,
+            verbose=self.verbose,
         )
         mapping_info.index = morphometry_summary.index[mask]
         morphometry_summary = morphometry_summary.join(
