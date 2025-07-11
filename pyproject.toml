@@ -8,6 +8,7 @@ dependencies = [
     "fast-simplification>=0.1.7",
     "joblib>=1.4.2",
     "meshmash",
+    "morphsync",
     "nglui>=3.7.2",
     "scikit-learn==1.6.1",
     "task-queue>=2.14.0",
@@ -26,3 +27,4 @@ requires = ["hatchling"]
 cave-mapper = { path = "../cave-mapper", editable = true }
 cloudigo = { path = "../cloudigo", editable = true }
 meshmash = { path = "../meshmash", editable = true }
+morphsync = { path = "../morphsync", editable = true }
