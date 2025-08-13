@@ -80,6 +80,48 @@ model_folder = Path(__file__).parent.parent / "models" / PARAMETER_NAME
 model_path = model_folder / f"{MODEL_VARIANT}.joblib"
 model = load(model_path)
 
+# %%
+
+from caveclient import CAVEclient
+from cloud_mesh import MorphClient
+
+version = 1412
+client = CAVEclient("minnie65_phase3_v1", version=version)
+column_table = client.materialize.query_table("allen_v1_column_types_slanted_ref")
+
+root_ids = column_table["pt_root_id"].unique()
+
+mc = MorphClient(
+    "minnie65_phase3_v1",
+    hks_parameters="absolute-solo-yak",
+    verbose=True,
+    n_jobs=-1,
+)
+has_hks = mc.has_hks(root_ids)
+
+# %%
+missing_root_ids = root_ids[~has_hks]
+missing_root_ids
+
+# %%
+datastack = "minnie65_phase3_v1"
+for root_id in missing_root_ids:
+    morphology = CloudMorphology(
+        root_id=root_id,
+        version=version,
+        datastack=datastack,
+        model_name=MODEL_VARIANT,
+        model=model,
+        parameters=parameters,
+        parameter_name=PARAMETER_NAME,
+        select_label="spine",
+        lookup_nucleus=True,
+        recompute=False,
+        verbose=True,
+        n_jobs=N_JOBS,
+        prediction_schema="new",
+    )
+    morphology.condensed_features
 
 # %%
 
@@ -156,7 +198,7 @@ def stop_fn(executed):
 if RUN:
     tq.poll(lease_seconds=LEASE_SECONDS, verbose=False, tally=False, stop_fn=stop_fn)
 
-#%%
+# %%
 tq.poll(lease_seconds=LEASE_SECONDS, verbose=False, tally=False, stop_fn=stop_fn)
 
 # %%
@@ -186,7 +228,7 @@ if REQUEST:
 
         tasks += [partial(run_for_root, root_id, "v1dd", 974) for root_id in root_ids]
 
-    if True:
+    if False:
         version = 1154
         datastack = "v1dd"
         client = CAVEclient(datastack_name=datastack, version=version)
@@ -211,8 +253,8 @@ if REQUEST:
 
     if False:
         datastack = "minnie65_phase3_v1"
-        # version = 1412
-        # client = CAVEclient(datastack_name=datastack, version=version)
+        version = 1412
+        client = CAVEclient(datastack_name=datastack, version=version)
 
         # NOTE: this was for getting cells with labels in my training set
         # table = pd.read_csv(
@@ -221,6 +263,13 @@ if REQUEST:
         # root_ids = table["pt_root_id"].unique()
 
         # NOTE: this was for getting all cells in the column
+        # table = (
+        #     client.materialize.query_table("allen_v1_column_types_slanted_ref")
+        #     .drop_duplicates("pt_root_id", keep=False)
+        #     .query("pt_root_id != 0")
+        #     .set_index("pt_root_id")
+        # )
+        # NOTE: this was for getting all nonneuron cells in the column
         # table = (
         #     client.materialize.query_table("allen_v1_column_types_slanted_ref")
         #     .drop_duplicates("pt_root_id", keep=False)
