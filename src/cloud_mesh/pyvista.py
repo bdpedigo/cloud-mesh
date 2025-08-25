@@ -72,9 +72,7 @@ class MorphPlotter(pv.Plotter):
             and morph.get_layer(layer_name).is_spatially_valid
         ):
             points_layer = morph.get_layer(layer_name)
-            print("here")
             scalars, clim = get_hue_info(points_layer, hue, clim)
-            print(scalars)
 
             super().add_points(
                 points_layer.vertices,

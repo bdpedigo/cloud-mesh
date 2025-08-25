@@ -4,7 +4,7 @@ FROM python:3.12-slim-bookworm
 # Install git
 RUN apt update 
 # RUN apt install -y git
-RUN apt-get update && apt-get install -y build-essential
+RUN apt-get update && apt-get install -y build-essential libgl1 libxrender1
 
 # Install uv
 COPY --from=ghcr.io/astral-sh/uv:0.4.3 /uv /bin/uv
@@ -18,7 +18,7 @@ COPY ./cloud-mesh/uv.lock /app/cloud-mesh/uv.lock
 COPY ./cloud-mesh/pyproject.toml /app/cloud-mesh/pyproject.toml
 COPY ./cloud-mesh/README.md /app/cloud-mesh/README.md
 COPY ./cloud-mesh/runners /app/cloud-mesh/runners
-COPY ./cloud-mesh/models /app/cloud-mesh/models
+COPY ./cloud-mesh/used_models /app/cloud-mesh/models
 COPY ./cloud-mesh/src /app/cloud-mesh/src
 WORKDIR /app/cloud-mesh
 
@@ -32,6 +32,7 @@ WORKDIR /app/cloud-mesh
 ADD cloudigo /app/cloudigo
 ADD meshmash /app/meshmash
 ADD cave-mapper /app/cave-mapper
+ADD morphsync /app/morphsync
 RUN uv sync
 # RUN --mount=type=cache,target=/root/.cache/uv \
 #     uv sync --frozen

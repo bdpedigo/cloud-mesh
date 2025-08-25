@@ -171,16 +171,17 @@ class MorphClient:
         synapses: Optional[pd.DataFrame] = None,
     ):
         """Add pre or post synapses to the MorphSync object."""
-        keep_cols = [
-            "ctr_pt_position_x",
-            "ctr_pt_position_y",
-            "ctr_pt_position_z",
-            "post_pt_root_id",
-            "post_pt_supervoxel_id",
-            "pre_pt_root_id",
-            "pre_pt_supervoxel_id",
-            "size",
-        ]
+        # keep_cols = [
+        #     "ctr_pt_position_x",
+        #     "ctr_pt_position_y",
+        #     "ctr_pt_position_z",
+        #     "post_pt_root_id",
+        #     "post_pt_supervoxel_id",
+        #     "pre_pt_root_id",
+        #     "pre_pt_supervoxel_id",
+        #     "size",
+        # ]
+        drop_cols = ["created", "updated", "valid"]
 
         morphs = listify(morphs)
         root_ids = [morph.name for morph in morphs]
@@ -198,8 +199,9 @@ class MorphClient:
         for morph in morphs:
             root_id = morph.name
             synapses = synapses_by_root[root_id]
+            synapses = synapses.drop(columns=drop_cols, errors="ignore")
             morph.add_points(
-                synapses[keep_cols],
+                synapses,
                 spatial_columns=[
                     "ctr_pt_position_x",
                     "ctr_pt_position_y",
@@ -269,6 +271,15 @@ class MorphClient:
                 )
                 morph.add_mesh(dummy_mesh, name="mesh", relation_columns=[])
             morph.add_link("mesh", "hks_features", mapping=labels, reciprocal=True)
+
+    def has_synapse_mesh_mappings(self, root_ids, side="pre"):
+        """
+        Check if synapse mesh mappings are available for the given root IDs.
+        """
+        queries = [f"{side}-synapse-mappings/{root_id}.npz" for root_id in root_ids]
+        does_exist = self.hks_cloudfiles.exists(queries)
+        exists_indicator = np.vectorize(does_exist.get)(queries)
+        return exists_indicator
 
     def get_synapse_mesh_mappings(self, root_ids, side="pre"):
         """
@@ -564,11 +575,66 @@ class MorphClient:
             morph.add_table(pd.DataFrame(index=l2_node_ids), name="level2_nodes")
             morph.add_link("level2_nodes", "level2_skeleton", mapping=l2_node_indices)
 
+    def get_level2_nodes(self, root_ids, root_l2_map=None):
+        # TODO this needs to be chunked for large numbers of l2_ids and parallelized
+        if root_l2_map is None:
+            l2_ids_by_root: dict[int, np.ndarray] = (
+                self.caveclient.chunkedgraph.get_leaves_many(root_ids, stop_layer=2)
+            )
+
+            l2_ids = []
+            root_ids = []
+            for root_id, sub_l2_ids in l2_ids_by_root.items():
+                l2_ids.extend(sub_l2_ids)
+                root_ids.extend([root_id] * len(sub_l2_ids))
+            l2_ids = np.array(l2_ids)
+            root_l2_map = pd.Series(index=root_ids, data=l2_ids, name="level2_id")
+            root_l2_map.index.name = "root_id"
+
+        l2_root_map = root_l2_map.reset_index().set_index("level2_id")
+        l2_ids = np.unique(l2_ids)
+        l2_data_table = self.caveclient.l2cache.get_l2data_table(
+            l2_ids, split_columns=True
+        ).rename_axis(index="level2_id")
+        l2_data_table.drop(
+            columns=["chunk_intersect_count", "pca_val"], inplace=True, errors="ignore"
+        )
+        l2_data_by_root = {}
+        for root_id, root_data in l2_data_table.groupby(
+            l2_data_table.index.map(l2_root_map["root_id"])
+        ):
+            l2_data_by_root[root_id] = root_data
+
+        return l2_data_by_root
+
+    def add_level2_nodes(self, morphs: list[MorphSync]):
+        """
+        Add level 2 nodes to the MorphSync object.
+        """
+        morphs = listify(morphs)
+        root_ids = [morph.name for morph in morphs]
+        # TODO should not have to look up l2 IDS if already have skeleton
+        l2_data_by_root = self.get_level2_nodes(root_ids)
+
+        for morph in morphs:
+            root_id = morph.name
+            if root_id not in l2_data_by_root:
+                continue
+            l2_data = l2_data_by_root[root_id]
+
+            morph.add_points(
+                l2_data,
+                name="level2_nodes",
+                spatial_columns=["rep_coord_nm_x", "rep_coord_nm_y", "rep_coord_nm_z"],
+            )
+
     def get_mesh(self, root_ids) -> dict[int, tuple[np.ndarray, np.ndarray]]:
         """
         Get the mesh for the given root ID.
         """
         cv = self.cloudvolume
+        # with warnings.catch_warnings():
+        #     # ignore warnings that are "WARNING:urllib3.connectionpool:Connection pool is full"
         meshes = cv.mesh.get(
             root_ids, deduplicate_chunk_boundaries=False, remove_duplicate_vertices=True
         )
@@ -623,7 +689,6 @@ class MorphClient:
         morphs = listify(morphs)
         root_ids = [morph.name for morph in morphs]
         components_by_root = self.get_component_mappings(root_ids)
-
         for morph in morphs:
             root_id = morph.name
             if root_id not in components_by_root:

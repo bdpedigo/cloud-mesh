@@ -23,7 +23,10 @@ urllib3.disable_warnings()
 
 logging.getLogger("urllib3").setLevel(logging.CRITICAL)
 
-MODEL_NAME = os.environ.get("MODEL_NAME", "absolute-solo-yak")
+PARAMETER_NAME = os.environ.get("PARAMETER_NAME", "absolute-solo-yak")
+MODEL_NAME = os.environ.get("MODEL_NAME", "auburn-elk-detour")
+MODEL_VARIANT = os.environ.get("MODEL_VARIANT", "synapse_hks_model")
+
 VERBOSE = str(os.environ.get("VERBOSE", "True")).lower() == "true"
 N_JOBS = int(os.environ.get("N_JOBS", -2))
 REPLICAS = int(os.environ.get("REPLICAS", 1))
@@ -37,8 +40,7 @@ MAX_RETRIES = int(os.environ.get("MAX_RETRIES", 4))
 BACKOFF_FACTOR = int(os.environ.get("BACKOFF_FACTOR", 4))
 BACKOFF_MAX = int(os.environ.get("BACKOFF_MAX", 120))
 MAX_RUNS = int(os.environ.get("MAX_RUNS", 5))
-MODEL_VARIANT = os.environ.get("MODEL_VARIANT", "hks_model_calibrated")
-
+USE_MODEL = False
 
 # logging.basicConfig(level="ERROR")
 
@@ -70,58 +72,15 @@ def replace_none(parameters):
     return parameters
 
 
-model_folder = Path(__file__).parent.parent / "models" / MODEL_NAME
-
-parameters = toml.load(model_folder / "parameters.toml")
+parameter_folder = Path(__file__).parent.parent / "models" / PARAMETER_NAME
+parameters = toml.load(parameter_folder / "parameters.toml")
 parameters = replace_none(parameters)
-PARAMETER_NAME = "absolute-solo-yak"
 
-model_folder = Path(__file__).parent.parent / "models" / PARAMETER_NAME
+model_folder = Path(__file__).parent.parent / "models" / MODEL_NAME
 model_path = model_folder / f"{MODEL_VARIANT}.joblib"
 model = load(model_path)
+MODEL_KEY = f"{MODEL_NAME}-{MODEL_VARIANT}"
 
-# %%
-
-from caveclient import CAVEclient
-from cloud_mesh import MorphClient
-
-version = 1412
-client = CAVEclient("minnie65_phase3_v1", version=version)
-column_table = client.materialize.query_table("allen_v1_column_types_slanted_ref")
-
-root_ids = column_table["pt_root_id"].unique()
-
-mc = MorphClient(
-    "minnie65_phase3_v1",
-    hks_parameters="absolute-solo-yak",
-    verbose=True,
-    n_jobs=-1,
-)
-has_hks = mc.has_hks(root_ids)
-
-# %%
-missing_root_ids = root_ids[~has_hks]
-missing_root_ids
-
-# %%
-datastack = "minnie65_phase3_v1"
-for root_id in missing_root_ids:
-    morphology = CloudMorphology(
-        root_id=root_id,
-        version=version,
-        datastack=datastack,
-        model_name=MODEL_VARIANT,
-        model=model,
-        parameters=parameters,
-        parameter_name=PARAMETER_NAME,
-        select_label="spine",
-        lookup_nucleus=True,
-        recompute=False,
-        verbose=True,
-        n_jobs=N_JOBS,
-        prediction_schema="new",
-    )
-    morphology.condensed_features
 
 # %%
 
@@ -137,7 +96,7 @@ def run_for_root(
         root_id=root_id,
         version=version,
         datastack=datastack,
-        model_name=MODEL_VARIANT,
+        model_name=MODEL_KEY,
         model=model,
         parameters=parameters,
         parameter_name=PARAMETER_NAME,
@@ -148,8 +107,12 @@ def run_for_root(
         n_jobs=N_JOBS,
         prediction_schema="new",
     )
-    morphology.morphometry_summary
-    morphology.post_synapse_predictions
+    morphology.condensed_features
+    morphology.post_synapse_mappings
+    morphology.pre_synapse_mappings
+
+    # morphology.morphometry_summary
+    # morphology.post_synapse_predictions
 
     # morphology.pre_synapse_mappings
     # morphology.post_synapse_mappings
@@ -197,9 +160,6 @@ def stop_fn(executed):
 
 if RUN:
     tq.poll(lease_seconds=LEASE_SECONDS, verbose=False, tally=False, stop_fn=stop_fn)
-
-# %%
-tq.poll(lease_seconds=LEASE_SECONDS, verbose=False, tally=False, stop_fn=stop_fn)
 
 # %%
 
@@ -251,10 +211,8 @@ if REQUEST:
             for root_id in root_ids
         ]
 
-    if False:
+    if True:
         datastack = "minnie65_phase3_v1"
-        version = 1412
-        client = CAVEclient(datastack_name=datastack, version=version)
 
         # NOTE: this was for getting cells with labels in my training set
         # table = pd.read_csv(
@@ -263,19 +221,41 @@ if REQUEST:
         # root_ids = table["pt_root_id"].unique()
 
         # NOTE: this was for getting all cells in the column
-        # table = (
-        #     client.materialize.query_table("allen_v1_column_types_slanted_ref")
-        #     .drop_duplicates("pt_root_id", keep=False)
-        #     .query("pt_root_id != 0")
-        #     .set_index("pt_root_id")
+        # version = 1412
+        # client = CAVEclient(datastack_name=datastack, version=version)
+
+        # table = client.materialize.query_table(
+        #     "allen_v1_column_types_slanted_ref"
+        # ).set_index("target_id")
+
+        # root_ids = table.index.unique()
+
+        # client = CAVEclient(DATASTACK, version=VERSION)
+        # # column_table = client.materialize.query_table(
+        # #     "allen_v1_column_types_slanted_ref"
+        # # ).set_index("pt_root_id")
+        # cell_table = client.materialize.query_view("aibs_cell_info")
+        # neuron_table = (
+        #     cell_table.query("broad_type.isin(['excitatory', 'inhibitory'])")
+        #     .copy()
+        #     .set_index("id")
         # )
-        # NOTE: this was for getting all nonneuron cells in the column
-        # table = (
-        #     client.materialize.query_table("allen_v1_column_types_slanted_ref")
-        #     .drop_duplicates("pt_root_id", keep=False)
-        #     .query("pt_root_id != 0")
-        #     .set_index("pt_root_id")
+        # # neuron_table = neuron_table.query("pt_root_id != 0")
+        # root_ids = neuron_table["pt_root_id"].unique()
+        # # root_ids = np.random.choice(root_ids, size=N_PER_BATCH, replace=False)
+
+        # currtime = time.time()
+        # mc = MorphClient(
+        #     "minnie65_phase3_v1",
+        #     hks_parameters="absolute-solo-yak",
+        #     verbose=VERBOSE,
+        #     n_jobs=N_JOBS,
         # )
+
+        # has_hks = mc.has_hks(root_ids)
+
+        # root_ids = root_ids[~has_hks]
+        # print(len(missing_roots), "morphs are missing HKS features.")
 
         # NOTE: this was for getting all putative neurons
         # table = (
@@ -288,30 +268,31 @@ if REQUEST:
         # root_ids = table.index.unique()
 
         # NOTE: this is for looking at a handful of inhibitory cells from 611
-        table = pd.read_csv(
-            "/Users/ben.pedigo/code/meshrep/611_inhibitory_cells_at_1474.csv"
-        ).set_index("pt_root_id")
-        root_ids = table.index.unique()
-        tasks += [
-            partial(
-                run_for_root,
-                root_id,
-                datastack,
-                1474,
-            )
-            for root_id in root_ids
-        ]
+        # table = pd.read_csv(
+        #     "/Users/ben.pedigo/code/meshrep/611_inhibitory_cells_at_1474.csv"
+        # ).set_index("pt_root_id")
+        # root_ids = table.index.unique()
+        # tasks += [
+        #     partial(
+        #         run_for_root,
+        #         root_id,
+        #         datastack,
+        #         1474,
+        #     )
+        #     for root_id in root_ids
+        # ]
 
         # NOTE: this was for getting column inputs at 1412
-        table = (
-            pd.read_csv("meshrep/data/random/synapses_onto_column_count_1412.csv")
-            .set_index("pre_pt_root_id")
-            .query("synapse_onto_column_count_1412 >= 3")
-        )
-        root_ids = table.index.unique()
-        tasks += [
-            partial(run_for_root, root_id, datastack, 1412) for root_id in root_ids
-        ]
+        # table = (
+        #     pd.read_csv("meshrep/data/random/synapses_onto_column_count_1412.csv")
+        #     .set_index("pre_pt_root_id")
+        #     .query("synapse_onto_column_count_1412 >= 3")
+        # )
+        # root_ids = table.index.unique()
+
+        # tasks += [
+        #     # partial(run_for_root, root_id, datastack, 1412) for root_id in root_ids
+        # ]
 
         # NOTE: this was for getting column inputs at 117
         # table = (
@@ -325,9 +306,11 @@ if REQUEST:
 
         # Note: column outputs
 
-        # root_ids = np.random.permutation(root_ids)
-        # tasks += [partial(run_for_root, root_id, datastack, version) for root_id in root_ids]
-        print(len(tasks))
+        root_ids = np.random.permutation(root_ids)
+        tasks += [
+            partial(run_for_root, root_id, datastack, version) for root_id in root_ids
+        ]
+        # print(len(tasks))
 
     if False:
         datastack = "zheng_ca3"
@@ -384,7 +367,49 @@ if REQUEST:
 
 
 # %%
-# run_for_root(root_ids[-1], 'minnie65_phase3_v1', 1412)
+# run_for_root(root_ids[0], "minnie65_phase3_v1", 1412)
+
+# %%
+# root_id = root_ids[-1]
+# version = 1412
+# morphology = CloudMorphology(
+#     root_id=root_id,
+#     version=version,
+#     datastack=datastack,
+#     model_name=MODEL_KEY,
+#     model=model,
+#     parameters=parameters,
+#     parameter_name=PARAMETER_NAME,
+#     select_label="spine",
+#     lookup_nucleus=False,
+#     recompute=RECOMPUTE,
+#     verbose=VERBOSE,
+#     n_jobs=N_JOBS,
+#     prediction_schema="new",
+# )
+# morphology.morphometry_summary
+
+# %%
+# from nglui.statebuilder import ViewerState
+
+# morphometry_summary = morphology.morphometry_summary.copy().sort_values(
+#     "n_post_synapses", ascending=False
+# )
+# morphometry_summary["point"] = morphometry_summary[["x", "y", "z"]].values.tolist()
+# vs = (
+#     ViewerState(client=client)
+#     .add_layers_from_client()
+#     .add_segments([root_id])
+#     .add_points(
+#         morphometry_summary,
+#         name="spines",
+#         point_column="point",
+#         description_column="n_post_synapses",
+#         data_resolution=[1, 1, 1],
+#         swap_visible_segments_on_move=False
+#     )
+# )
+# vs.to_browser(shorten=True, browser="firefox")
 
 
 # %%

@@ -429,7 +429,7 @@ class CloudMorphology:
             if not exists(graph_file) or self.recompute:
                 self._hks_pipeline()
             else:
-                _, nodes, edges = read_condensed_graph(graph_file)
+                nodes, edges = read_condensed_graph(graph_file)
                 self._condensed_nodes = nodes
                 self._condensed_edges = edges
         return self._condensed_nodes
@@ -441,7 +441,7 @@ class CloudMorphology:
             if not exists(graph_file) or self.recompute:
                 self._hks_pipeline()
             else:
-                _, nodes, edges = read_condensed_graph(graph_file)
+                nodes, edges = read_condensed_graph(graph_file)
                 self._condensed_nodes = nodes
                 self._condensed_edges = edges
         return self._condensed_edges
@@ -451,7 +451,15 @@ class CloudMorphology:
         condensed_features = self.condensed_features
         model = self.model
 
+        columns = model.feature_names_in_
+        missing_columns = np.setdiff1d(columns, condensed_features.columns)
+        if len(missing_columns) > 0:
+            condensed_features = condensed_features.join(
+                self.condensed_nodes[missing_columns]
+            )
+
         condensed_features = condensed_features[model.feature_names_in_]
+        condensed_features = condensed_features.dropna(axis=0, how="any")
 
         condensed_posteriors = model.predict_proba(condensed_features)
         condensed_posteriors = pd.DataFrame(
