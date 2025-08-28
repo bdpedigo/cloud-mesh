@@ -5,7 +5,7 @@ metadata:
     run: cloud-mesh
   name: cloud-mesh
 spec:
-  replicas: 128 # number of pods to run
+  replicas: 1 # number of pods to run
   selector:
     matchLabels:
       run: cloud-mesh
@@ -20,36 +20,29 @@ spec:
         run: cloud-mesh # metadata label attached to pod
     spec:
       containers:
-        - image: bdpedigo/cloud-mesh:v31 # image to pull from dockerhub
+        - image: bdpedigo/cloud-mesh:v60 # image to pull from dockerhub
           name: cloud-mesh # name of container in pod
           imagePullPolicy: Always
           command: ["/bin/sh"]
           # runners/predict_synapse_compartments_2024-11-07.py
           # args: ["-c", "while true; do uv run runners/condensed_features_latest.py; done"]
-          args: ["-c", "while true; do uv run runners/prediction_on_synapses.py; done"]
+          # args: ["-c", "while true; do uv run runners/myscript.py; done"]
+          args: ["-c", "while true; do uv run runners/run_script.py; done"]
           env:
             - name: CLOUDSDK_CORE_PROJECT
               value: ${CLOUDSDK_CORE_PROJECT}
             - name: GOOGLE_APPLICATION_CREDENTIALS
               value: "/root/.cloudvolume/secrets/google-secret.json" #TODO
             - name: VERBOSE
-              value: "false"
+              value: "true"
             - name: N_JOBS
-              value: "1"
-            - name: REPLICAS
-              value: "256"
-            - name: OPENBLAS_NUM_THREADS
-              value: "1"
-            - name: MKL_NUM_THREADS
-              value: "1"
-            - name: NUMEXPR_NUM_THREADS
-              value: "1"
-            - name: OMP_NUM_THREADS
-              value: "1"
+              value: "-1"
             - name: QUEUE_NAME
-              value: "ben-skedit"
+              value: "ben-paleo"
             - name: RUN
               value: "true"
+            - name: REQUEST
+              value: "false"
             - name: LOGGING_LEVEL
               value: "ERROR"
             - name: LEASE_SECONDS
@@ -57,17 +50,22 @@ spec:
 
           resources:
             requests:
-              memory: 2.0Gi
+              memory: 200.0Gi
               cpu: "900m"
               ephemeral-storage: "4Gi"
             limits:
-              memory: "24.0Gi"
+              memory: "252.0Gi"
               ephemeral-storage: "16Gi"
           volumeMounts:
             - name: secrets-volume
               mountPath: /root/.cloudvolume/secrets
+            - name: script-volume
+              mountPath: /app/cloud-mesh/runners
       dnsPolicy: Default
       volumes:
         - name: secrets-volume
           secret:
             secretName: secrets
+        - name: script-volume
+          configMap:
+            name: script

@@ -157,7 +157,7 @@ def stop_fn(executed):
     if executed >= MAX_RUNS:
         quit()
 
-
+#%%
 if RUN:
     tq.poll(lease_seconds=LEASE_SECONDS, verbose=False, tally=False, stop_fn=stop_fn)
 
@@ -211,9 +211,8 @@ if REQUEST:
             for root_id in root_ids
         ]
 
-    if True:
-        datastack = "minnie65_phase3_v1"
-
+    if False:
+        pass
         # NOTE: this was for getting cells with labels in my training set
         # table = pd.read_csv(
         #     "/Users/ben.pedigo/code/meshrep/meshrep/experiments/cautious-fig-thaw/labels.csv"
@@ -230,32 +229,38 @@ if REQUEST:
 
         # root_ids = table.index.unique()
 
-        # client = CAVEclient(DATASTACK, version=VERSION)
-        # # column_table = client.materialize.query_table(
-        # #     "allen_v1_column_types_slanted_ref"
-        # # ).set_index("pt_root_id")
-        # cell_table = client.materialize.query_view("aibs_cell_info")
-        # neuron_table = (
-        #     cell_table.query("broad_type.isin(['excitatory', 'inhibitory'])")
-        #     .copy()
-        #     .set_index("id")
-        # )
-        # # neuron_table = neuron_table.query("pt_root_id != 0")
-        # root_ids = neuron_table["pt_root_id"].unique()
-        # # root_ids = np.random.choice(root_ids, size=N_PER_BATCH, replace=False)
 
-        # currtime = time.time()
-        # mc = MorphClient(
-        #     "minnie65_phase3_v1",
-        #     hks_parameters="absolute-solo-yak",
-        #     verbose=VERBOSE,
-        #     n_jobs=N_JOBS,
-        # )
+    if True:
+        from cloud_mesh import MorphClient
+        import time
+        datastack = "minnie65_phase3_v1"
+        version = 1412
+        client = CAVEclient(datastack, version=version)
+        # column_table = client.materialize.query_table(
+        #     "allen_v1_column_types_slanted_ref"
+        # ).set_index("pt_root_id")
+        cell_table = client.materialize.query_view("aibs_cell_info")
+        neuron_table = (
+            cell_table.query("broad_type.isin(['excitatory', 'inhibitory'])")
+            .copy()
+            .set_index("id")
+        )
+        # neuron_table = neuron_table.query("pt_root_id != 0")
+        root_ids = neuron_table["pt_root_id"].unique()
+        # root_ids = np.random.choice(root_ids, size=N_PER_BATCH, replace=False)
 
-        # has_hks = mc.has_hks(root_ids)
+        currtime = time.time()
+        mc = MorphClient(
+            "minnie65_phase3_v1",
+            hks_parameters="absolute-solo-yak",
+            verbose=VERBOSE,
+            n_jobs=N_JOBS,
+        )
 
-        # root_ids = root_ids[~has_hks]
-        # print(len(missing_roots), "morphs are missing HKS features.")
+        has_hks = mc.has_hks(root_ids)
+
+        root_ids = root_ids[~has_hks]
+        print(len(root_ids), "morphs are missing HKS features.")
 
         # NOTE: this was for getting all putative neurons
         # table = (

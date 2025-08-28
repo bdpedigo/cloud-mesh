@@ -13,6 +13,7 @@ dependencies = [
     "pyvista[all]>=0.44.2",
     "scikit-learn==1.6.1",
     "task-queue>=2.14.0",
+    "tensorstore>=0.1.76",
     "toml>=0.10.2",
 ]
 name = "cloud-mesh"

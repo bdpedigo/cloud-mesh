@@ -338,7 +338,7 @@ if REQUEST:
 
         tasks += [partial(run_for_root, root_id, "v1dd", 974) for root_id in root_ids]
 
-    if True:
+    if False:
         datastack = "minnie65_phase3_v1"
         version = 1412
         client = CAVEclient(datastack_name=datastack, version=version)

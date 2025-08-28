@@ -79,6 +79,7 @@ class MorphClient:
         model_target: Optional[str] = None,
         verbose: bool = True,
         n_jobs: int = 1,
+        copy: bool = False,
     ):
         self.datastack = datastack
         self.hks_parameters = hks_parameters
@@ -89,6 +90,7 @@ class MorphClient:
         self.n_jobs = n_jobs
         self._parallel = None
         self._cloudvolume = None
+        self.copy = copy
 
         if hks_parameters is not None:
             self.hks_base_path = f"gs://bdp-ssa/{datastack}/{hks_parameters}/"
@@ -201,13 +203,14 @@ class MorphClient:
             synapses = synapses_by_root[root_id]
             synapses = synapses.drop(columns=drop_cols, errors="ignore")
             morph.add_points(
-                synapses,
+                name=f"{side}_synapses",
+                points=synapses,
                 spatial_columns=[
                     "ctr_pt_position_x",
                     "ctr_pt_position_y",
                     "ctr_pt_position_z",
                 ],
-                name=f"{side}_synapses",
+                copy=self.copy,
             )
 
     def get_hks(self, root_ids):
@@ -261,7 +264,7 @@ class MorphClient:
                 continue
             features, labels = features_by_root[root_id]
 
-            morph.add_table(features, name="hks_features")
+            morph.add_table(name="hks_features", table=features, copy=self.copy)
 
             n_mesh_nodes = len(labels)
             if not hasattr(morph, "mesh"):
@@ -269,7 +272,9 @@ class MorphClient:
                     pd.DataFrame(index=pd.RangeIndex(n_mesh_nodes)),
                     pd.DataFrame(),
                 )
-                morph.add_mesh(dummy_mesh, name="mesh", relation_columns=[])
+                morph.add_mesh(
+                    name="mesh", mesh=dummy_mesh, relation_columns=[], copy=self.copy
+                )
             morph.add_link("mesh", "hks_features", mapping=labels, reciprocal=True)
 
     def has_synapse_mesh_mappings(self, root_ids, side="pre"):
@@ -335,12 +340,16 @@ class MorphClient:
             if not hasattr(morph, f"{side}_synapses"):
                 # add dummy synapses in case we aren't going to look them up later
                 morph.add_points(
-                    pd.DataFrame(index=id_to_mesh_map.index),
                     name=f"{side}_synapses",
+                    points=pd.DataFrame(index=id_to_mesh_map.index),
+                    copy=self.copy,
                 )
 
             morph.add_link(
-                f"{side}_synapses", "mesh", mapping=id_to_mesh_map, reciprocal=True
+                f"{side}_synapses",
+                "mesh",
+                mapping=id_to_mesh_map,
+                reciprocal=True,
             )
 
     def get_supermoxel_graphs(self, root_ids):
@@ -394,10 +403,11 @@ class MorphClient:
 
             nodes, edges = graphs_by_root[root_id]
             morph.add_graph(
-                (nodes, edges),
                 name="supermoxel_graph",
+                graph=(nodes, edges),
                 spatial_columns=["x", "y", "z"],
                 relation_columns=["source", "target"],
+                copy=self.copy,
             )
             morph.add_link(
                 "supermoxel_graph",
@@ -567,12 +577,17 @@ class MorphClient:
             ) / 2
 
             morph.add_graph(
-                (nodes, edges),
                 name="level2_skeleton",
+                graph=(nodes, edges),
                 spatial_columns=["x", "y", "z"],
                 relation_columns=["source", "target"],
+                copy=self.copy,
             )
-            morph.add_table(pd.DataFrame(index=l2_node_ids), name="level2_nodes")
+            morph.add_table(
+                name="level2_nodes",
+                table=pd.DataFrame(index=l2_node_ids),
+                copy=self.copy,
+            )
             morph.add_link("level2_nodes", "level2_skeleton", mapping=l2_node_indices)
 
     def get_level2_nodes(self, root_ids, root_l2_map=None):
@@ -623,9 +638,10 @@ class MorphClient:
             l2_data = l2_data_by_root[root_id]
 
             morph.add_points(
-                l2_data,
                 name="level2_nodes",
+                points=l2_data,
                 spatial_columns=["rep_coord_nm_x", "rep_coord_nm_y", "rep_coord_nm_z"],
+                copy=self.copy,
             )
 
     def get_mesh(self, root_ids) -> dict[int, tuple[np.ndarray, np.ndarray]]:
@@ -654,7 +670,7 @@ class MorphClient:
             mesh = meshes_by_root.get(morph.name, None)
             if mesh is None:
                 continue
-            morph.add_mesh(mesh, name="mesh")
+            morph.add_mesh(name="mesh", mesh=mesh, copy=self.copy)
 
     def get_component_mappings(self, root_ids):
         root_ids = int_listify(root_ids)
@@ -749,5 +765,8 @@ class MorphClient:
             features = features_by_root[root_id]
 
             morph.add_points(
-                features, name="spine_morphometry", spatial_columns=["x", "y", "z"]
+                name="spine_morphometry",
+                points=features,
+                spatial_columns=["x", "y", "z"],
+                copy=self.copy,
             )

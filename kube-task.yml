@@ -5,7 +5,7 @@ metadata:
     run: cloud-mesh
   name: cloud-mesh
 spec:
-  replicas: 64 # number of pods to run
+  replicas: 128 # number of pods to run
   selector:
     matchLabels:
       run: cloud-mesh
@@ -20,7 +20,7 @@ spec:
         run: cloud-mesh # metadata label attached to pod
     spec:
       containers:
-        - image: bdpedigo/cloud-mesh:v53 # image to pull from dockerhub
+        - image: bdpedigo/cloud-mesh:v54 # image to pull from dockerhub
           name: cloud-mesh # name of container in pod
           imagePullPolicy: Always
           command: ["/bin/sh"]

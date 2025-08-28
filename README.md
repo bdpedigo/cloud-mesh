@@ -28,3 +28,6 @@ Watch the logs in real-time:
 
 Check for issues with the cluster:
 `kubectl describe nodes`
+
+Mount a local file to configmap: 
+`kubectl create configmap script --from-file ./runners/dfts_and_inference2.py`

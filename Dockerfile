@@ -44,4 +44,4 @@ ENV RUN='True'
 ENV TEST_RUN='False'
 ENV REQUEST='False'
 
-CMD ["uv", "run", "runners/cloud_morphology_features.py"]
+CMD ["uv", "run", "runners/dfts_and_inference.py"]
