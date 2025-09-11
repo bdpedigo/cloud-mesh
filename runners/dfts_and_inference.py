@@ -7,6 +7,7 @@ from functools import partial
 from pathlib import Path
 
 import joblib
+import numpy as np
 import pandas as pd
 from caveclient import CAVEclient
 from cloud_mesh import DataFrameTensorStore, MorphClient
@@ -89,6 +90,25 @@ root_batches = all_root_ids % N_BATCHES
 
 parallel_kwargs = dict(n_jobs=N_JOBS, mmap_mode=None, backend="threading")
 
+# # %%
+
+
+# root_samples = (
+#     pd.Series(index=all_root_ids, data=root_batches, name="root_batch")
+#     .to_frame()
+#     .groupby("root_batch")
+#     .sample(1)
+# )
+
+# client = CAVEclient("minnie65_phase3_v1", version=1412)
+# post_store = DataFrameTensorStore(post_path, verbose=False)
+
+# for root_sample, batch in root_samples.iterrows():
+#     syns = client.materialize.synapse_query(post_ids=root_sample, limit=100)
+#     print(batch)
+#     print(len(post_store.get_by_id(syns["id"].values)))
+#     print()
+
 
 # %%
 def get_features_from_morphs(morph, side="post") -> pd.DataFrame:
@@ -117,95 +137,100 @@ def run_batch(i):
     print()
     print("Running batch", i)
     print()
-    root_ids = all_root_ids[root_batches == i]
+    batch_root_ids = all_root_ids[root_batches == i]
+    sub_batches = np.array_split(batch_root_ids, 2)
 
-    currtime = time.time()
-    mc = MorphClient(
-        "minnie65_phase3_v1",
-        hks_parameters="absolute-solo-yak",
-        verbose=VERBOSE,
-        n_jobs=N_JOBS,
-        copy=True,
-    )
-
-    has_hks = mc.has_hks(root_ids)
-
-    missing_roots = root_ids[~has_hks]
-    print(len(missing_roots), "morphs are missing HKS features.")
-
-    print(f"Found {has_hks.mean()} morphs with HKS features.")
-    root_ids = root_ids[has_hks]
-    morphs = [MorphSync(name=root_id) for root_id in root_ids]
-    mc.add_hks(morphs)
-    mc.add_supermoxel_graph(morphs)
-    mc.add_synapse_mesh_mappings(morphs, side="post")
-    mc.add_synapse_mesh_mappings(morphs, side="pre")
-
-    with tqdm_joblib(
-        desc="Getting features on morphs", total=len(morphs), disable=not VERBOSE
-    ):
-        post_synapse_features = Parallel(**parallel_kwargs)(
-            delayed(get_features_from_morphs)(morph, side="post") for morph in morphs
+    for root_ids in sub_batches[1:]:
+        currtime = time.time()
+        mc = MorphClient(
+            "minnie65_phase3_v1",
+            hks_parameters="absolute-solo-yak",
+            verbose=VERBOSE,
+            n_jobs=N_JOBS,
+            copy=True,
         )
 
-    post_synapse_features = pd.concat(post_synapse_features, axis=0)
-    post_synapse_features.index.name = "synapse_id"
+        has_hks = mc.has_hks(root_ids)
 
-    if not DataFrameTensorStore.exists(post_path):
-        post_store = DataFrameTensorStore.initialize_from_sample(
-            post_path, post_synapse_features, n_rows=target_n_rows
+        missing_roots = root_ids[~has_hks]
+        print(len(missing_roots), "morphs are missing HKS features.")
+
+        print(f"Found {has_hks.mean()} morphs with HKS features.")
+        root_ids = root_ids[has_hks]
+        morphs = [MorphSync(name=root_id) for root_id in root_ids]
+        mc.add_hks(morphs)
+        mc.add_supermoxel_graph(morphs)
+        mc.add_synapse_mesh_mappings(morphs, side="post")
+        mc.add_synapse_mesh_mappings(morphs, side="pre")
+
+        with tqdm_joblib(
+            desc="Getting features on morphs", total=len(morphs), disable=not VERBOSE
+        ):
+            post_synapse_features = Parallel(**parallel_kwargs)(
+                delayed(get_features_from_morphs)(morph, side="post")
+                for morph in morphs
+            )
+
+        post_synapse_features = pd.concat(post_synapse_features, axis=0)
+        post_synapse_features.index.name = "synapse_id"
+
+        if not DataFrameTensorStore.exists(post_path):
+            post_store = DataFrameTensorStore.initialize_from_sample(
+                post_path, post_synapse_features, n_rows=target_n_rows
+            )
+        post_store = DataFrameTensorStore(post_path, verbose=True)
+
+        post_store.write_dataframe(post_synapse_features)
+
+        posteriors = model.predict_proba(post_synapse_features)
+
+        posteriors = pd.DataFrame(
+            posteriors, index=post_synapse_features.index, columns=model.classes_
         )
-    post_store = DataFrameTensorStore(post_path, verbose=True)
+        posteriors = posteriors.astype("float16")
+        posteriors.index.name = "synapse_id"
 
-    post_store.write_dataframe(post_synapse_features)
-
-    posteriors = model.predict_proba(post_synapse_features)
-
-    posteriors = pd.DataFrame(
-        posteriors, index=post_synapse_features.index, columns=model.classes_
-    )
-    posteriors = posteriors.astype("float16")
-    posteriors.index.name = "synapse_id"
-
-    if not DataFrameTensorStore.exists(post_prediction_path):
-        post_prediction_store = DataFrameTensorStore.initialize_from_sample(
-            post_prediction_path, posteriors, n_rows=target_n_rows
+        if not DataFrameTensorStore.exists(post_prediction_path):
+            post_prediction_store = DataFrameTensorStore.initialize_from_sample(
+                post_prediction_path, posteriors, n_rows=target_n_rows
+            )
+        post_prediction_store = DataFrameTensorStore(
+            post_prediction_path, verbose=VERBOSE
         )
-    post_prediction_store = DataFrameTensorStore(post_prediction_path, verbose=VERBOSE)
-    post_prediction_store.write_dataframe(posteriors)
+        post_prediction_store.write_dataframe(posteriors)
 
-    del post_synapse_features
-    del posteriors
+        del post_synapse_features
+        del posteriors
 
-    with tqdm_joblib(
-        desc="Getting features on morphs", total=len(morphs), disable=not VERBOSE
-    ):
-        pre_synapse_features = Parallel(**parallel_kwargs)(
-            delayed(get_features_from_morphs)(morph, side="pre") for morph in morphs
-        )
-    pre_synapse_features = pd.concat(pre_synapse_features, axis=0)
-    pre_synapse_features.index.name = "synapse_id"
+        with tqdm_joblib(
+            desc="Getting features on morphs", total=len(morphs), disable=not VERBOSE
+        ):
+            pre_synapse_features = Parallel(**parallel_kwargs)(
+                delayed(get_features_from_morphs)(morph, side="pre") for morph in morphs
+            )
+        pre_synapse_features = pd.concat(pre_synapse_features, axis=0)
+        pre_synapse_features.index.name = "synapse_id"
 
-    if not DataFrameTensorStore.exists(pre_path):
-        pre_store = DataFrameTensorStore.initialize_from_sample(
-            pre_path, pre_synapse_features, n_rows=target_n_rows, verbose=VERBOSE
-        )
-    pre_store = DataFrameTensorStore(pre_path, verbose=VERBOSE)
+        if not DataFrameTensorStore.exists(pre_path):
+            pre_store = DataFrameTensorStore.initialize_from_sample(
+                pre_path, pre_synapse_features, n_rows=target_n_rows, verbose=VERBOSE
+            )
+        pre_store = DataFrameTensorStore(pre_path, verbose=VERBOSE)
 
-    pre_store.write_dataframe(pre_synapse_features)
-    del pre_synapse_features
+        pre_store.write_dataframe(pre_synapse_features)
+        del pre_synapse_features
 
-    print()
-    print(f"{time.time() - currtime:.3f} seconds elapsed for batch.")
-    print()
+        print()
+        print(f"{time.time() - currtime:.3f} seconds elapsed for batch.")
+        print()
 
     return True
 
+run_batch(20)
 
 # %%
 if REQUEST:
     tq.insert(partial(run_batch, i) for i in range(N_BATCHES))
-
 
 # %%
 
@@ -218,4 +243,4 @@ def stop_fn(executed):
 if RUN:
     tq.poll(lease_seconds=LEASE_SECONDS, verbose=False, tally=False, stop_fn=stop_fn)
 
-#%%
+# %%

@@ -106,6 +106,7 @@ class CloudMorphology:
     version: int = attrs.field()
     parameters: dict = attrs.field(repr=False)
     parameter_name: str = attrs.field()
+    timestamp: Optional[int] = attrs.field(default=None)
     model: Optional[Any] = attrs.field(default=None, repr=False, init=True)
     model_name: Optional[str] = attrs.field(default=None, repr=False, init=True)
     scale: float = attrs.field(default=1.0)
@@ -271,6 +272,7 @@ class CloudMorphology:
                     root_id,
                     self.mesh,
                     client,
+                    timestamp=self.timestamp,
                     version=self.version,
                     side="pre",
                     **self.parameters["project_points_to_mesh"],
@@ -309,6 +311,7 @@ class CloudMorphology:
                     self.mesh,
                     client,
                     version=self.version,
+                    timestamp=self.timestamp,
                     side="post",
                     **self.parameters["project_points_to_mesh"],
                 )

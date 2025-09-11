@@ -9,7 +9,7 @@ from tqdm.auto import tqdm
 
 # TODO make these configurable
 MINISHARD_TARGET_COUNT = 1000
-SHARD_TARGET_SIZE = 50000000
+SHARD_TARGET_SIZE = 50_000_000
 ID_DTYPE = ">u8"
 
 

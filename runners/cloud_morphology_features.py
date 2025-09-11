@@ -1,10 +1,12 @@
 # %%
+import datetime
 import json
 import logging
 import os
 import platform
 from functools import partial
 from pathlib import Path
+from typing import Optional
 
 import numpy as np
 import pandas as pd
@@ -90,6 +92,7 @@ def run_for_root(
     root_id: int,
     datastack: str,
     version: int,
+    timestamp: Optional[datetime.datetime] = None,
 ):
     # total_time = time.time()
     morphology = CloudMorphology(
@@ -102,10 +105,11 @@ def run_for_root(
         parameter_name=PARAMETER_NAME,
         select_label="spine",
         lookup_nucleus=False,
-        recompute=RECOMPUTE,
+        recompute=True,
         verbose=VERBOSE,
         n_jobs=N_JOBS,
         prediction_schema="new",
+        timestamp=timestamp,
     )
     morphology.condensed_features
     morphology.post_synapse_mappings
@@ -150,6 +154,90 @@ def run_for_root(
     return True
 
 
+# %%
+
+root_ids = [
+    864691135566544407,
+    864691136136750219,
+    864691136953599967,
+    864691136953600223,
+    864691135480202694,
+    864691137021536110,
+    864691135976271727,
+    864691136335456435,
+    864691135360617560,
+    864691135405243374,
+    864691135293956790,
+    864691135100150975,
+    864691135802064226,
+    864691136136754571,
+    864691135635220137,
+    864691136725416701,
+    864691136321036695,
+    864691136149981009,
+    864691136564263330,
+    864691135396097269,
+    864691135727308607,
+    864691135682310804,
+    864691135760476238,
+    864691135656043714,
+    864691135448241748,
+    864691135701205026,
+    864691135694711487,
+    864691137055792502,
+    864691136680554614,
+    864691136725416445,
+    864691135581604594,
+    864691134966216991,
+    864691136484596012,
+    864691135566703383,
+    864691136619162843,
+    864691135860682600,
+    864691135527854683,
+    864691135739335281,
+    864691135976511087,
+    864691136445837955,
+    864691136523795089,
+    864691135939275524,
+    864691135839628947,
+    864691135492740327,
+    864691135409510345,
+    864691135912005801,
+    864691136058332632,
+    864691135465728069,
+    864691136086333036,
+    864691135469461644,
+    864691135976536687,
+    864691135742446443,
+    864691136136942731,
+    864691135186423929,
+    864691135701347106,
+    864691136275662861,
+    864691135294904076,
+    864691136725543165,
+    864691135447725202,
+    864691135387317077,
+    864691135361910087,
+    864691136215048126,
+    864691135115015065,
+    864691135015287702,
+    864691135503854658,
+    864691135442481480,
+    864691135784868147,
+    864691135646639599,
+    864691135106081357,
+]
+
+from caveclient import CAVEclient
+
+client = CAVEclient("minnie65_phase3_v1")
+for root_id in root_ids[:1]:
+    timestamp = client.chunkedgraph.get_root_timestamps([root_id], latest=True)[0]
+    print(root_id, timestamp)
+    run_for_root(root_id, "minnie65_phase3_v1", None, timestamp=timestamp)
+
+# %%
+
 tq = TaskQueue(f"https://sqs.us-west-2.amazonaws.com/629034007606/{QUEUE_NAME}")
 
 
@@ -157,7 +245,8 @@ def stop_fn(executed):
     if executed >= MAX_RUNS:
         quit()
 
-#%%
+
+# %%
 if RUN:
     tq.poll(lease_seconds=LEASE_SECONDS, verbose=False, tally=False, stop_fn=stop_fn)
 
@@ -229,10 +318,11 @@ if REQUEST:
 
         # root_ids = table.index.unique()
 
-
     if True:
-        from cloud_mesh import MorphClient
         import time
+
+        from cloud_mesh import MorphClient
+
         datastack = "minnie65_phase3_v1"
         version = 1412
         client = CAVEclient(datastack, version=version)
