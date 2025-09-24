@@ -115,7 +115,7 @@ def run_for_root(
     morphology.post_synapse_mappings
     morphology.pre_synapse_mappings
 
-    # morphology.morphometry_summary
+    morphology.morphometry_summary
     # morphology.post_synapse_predictions
 
     # morphology.pre_synapse_mappings
@@ -153,88 +153,6 @@ def run_for_root(
 
     return True
 
-
-# %%
-
-root_ids = [
-    864691135566544407,
-    864691136136750219,
-    864691136953599967,
-    864691136953600223,
-    864691135480202694,
-    864691137021536110,
-    864691135976271727,
-    864691136335456435,
-    864691135360617560,
-    864691135405243374,
-    864691135293956790,
-    864691135100150975,
-    864691135802064226,
-    864691136136754571,
-    864691135635220137,
-    864691136725416701,
-    864691136321036695,
-    864691136149981009,
-    864691136564263330,
-    864691135396097269,
-    864691135727308607,
-    864691135682310804,
-    864691135760476238,
-    864691135656043714,
-    864691135448241748,
-    864691135701205026,
-    864691135694711487,
-    864691137055792502,
-    864691136680554614,
-    864691136725416445,
-    864691135581604594,
-    864691134966216991,
-    864691136484596012,
-    864691135566703383,
-    864691136619162843,
-    864691135860682600,
-    864691135527854683,
-    864691135739335281,
-    864691135976511087,
-    864691136445837955,
-    864691136523795089,
-    864691135939275524,
-    864691135839628947,
-    864691135492740327,
-    864691135409510345,
-    864691135912005801,
-    864691136058332632,
-    864691135465728069,
-    864691136086333036,
-    864691135469461644,
-    864691135976536687,
-    864691135742446443,
-    864691136136942731,
-    864691135186423929,
-    864691135701347106,
-    864691136275662861,
-    864691135294904076,
-    864691136725543165,
-    864691135447725202,
-    864691135387317077,
-    864691135361910087,
-    864691136215048126,
-    864691135115015065,
-    864691135015287702,
-    864691135503854658,
-    864691135442481480,
-    864691135784868147,
-    864691135646639599,
-    864691135106081357,
-]
-
-from caveclient import CAVEclient
-
-client = CAVEclient("minnie65_phase3_v1")
-for root_id in root_ids[:1]:
-    timestamp = client.chunkedgraph.get_root_timestamps([root_id], latest=True)[0]
-    print(root_id, timestamp)
-    run_for_root(root_id, "minnie65_phase3_v1", None, timestamp=timestamp)
 
 # %%
 
@@ -318,7 +236,7 @@ if REQUEST:
 
         # root_ids = table.index.unique()
 
-    if True:
+    if False:
         import time
 
         from cloud_mesh import MorphClient
@@ -351,6 +269,21 @@ if REQUEST:
 
         root_ids = root_ids[~has_hks]
         print(len(root_ids), "morphs are missing HKS features.")
+
+    if True:
+        datastack = "minnie65_phase3_v1"
+        version = 1412
+        client = CAVEclient(datastack, version=version)
+        cell_table = client.materialize.query_table("allen_v1_column_types_slanted_ref")
+        cell_table = cell_table.drop_duplicates("pt_root_id", keep=False).set_index(
+            "pt_root_id"
+        )
+        root_ids = cell_table.index.unique()
+
+        root_ids = np.random.permutation(root_ids)
+        tasks += [
+            partial(run_for_root, root_id, datastack, version) for root_id in root_ids
+        ]
 
         # NOTE: this was for getting all putative neurons
         # table = (
@@ -401,10 +334,10 @@ if REQUEST:
 
         # Note: column outputs
 
-        root_ids = np.random.permutation(root_ids)
-        tasks += [
-            partial(run_for_root, root_id, datastack, version) for root_id in root_ids
-        ]
+        # root_ids = np.random.permutation(root_ids)
+        # tasks += [
+        #     partial(run_for_root, root_id, datastack, version) for root_id in root_ids
+        # ]
         # print(len(tasks))
 
     if False:
@@ -462,7 +395,7 @@ if REQUEST:
 
 
 # %%
-# run_for_root(root_ids[0], "minnie65_phase3_v1", 1412)
+run_for_root(root_ids[0], "minnie65_phase3_v1", 1412)
 
 # %%
 # root_id = root_ids[-1]

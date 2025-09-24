@@ -193,7 +193,7 @@ class MorphClient:
             )
         else:
             synapses_by_root = {}
-            for root_id, sub_synapses in synapses.groupby("post_pt_root_id"):
+            for root_id, sub_synapses in synapses.groupby(f"{side}_pt_root_id"):
                 synapses_by_root[root_id] = sub_synapses
             for root_id in root_ids:
                 if root_id not in synapses_by_root:

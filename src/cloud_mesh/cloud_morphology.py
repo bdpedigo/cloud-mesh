@@ -579,11 +579,15 @@ class CloudMorphology:
 
     @loggable
     def _morphometry_pipeline(self):
+        bound_volume_threshold = self.parameters.get(
+            "component_morphometry_pipeline", {}
+        ).get("bound_volume_threshold", 100)
         morphometry_summary, components = component_morphometry_pipeline(
             self.mesh,
             self.mesh_predictions,
             select_label=self.select_label,
             post_synapse_mappings=self.post_synapse_mappings,
+            bound_volume_threshold=bound_volume_threshold,
             verbose=self.verbose,
         )
 
