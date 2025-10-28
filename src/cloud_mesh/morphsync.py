@@ -275,7 +275,7 @@ class MorphClient:
                 morph.add_mesh(
                     name="mesh", mesh=dummy_mesh, relation_columns=[], copy=self.copy
                 )
-            morph.add_link("mesh", "hks_features", mapping=labels, reciprocal=True)
+            morph.add_link("mesh", "hks_features", mapping=labels)
 
     def has_synapse_mesh_mappings(self, root_ids, side="pre"):
         """
@@ -349,7 +349,7 @@ class MorphClient:
                 f"{side}_synapses",
                 "mesh",
                 mapping=id_to_mesh_map,
-                reciprocal=True,
+                
             )
 
     def get_supermoxel_graphs(self, root_ids):
@@ -402,6 +402,12 @@ class MorphClient:
                 continue
 
             nodes, edges = graphs_by_root[root_id]
+            # vertices = nodes[["x", "y", "z"]].values
+            # edge_lengths = np.linalg.norm(
+            #     vertices[edges[:, 0]] - vertices[edges[:, 1]], axis=1
+            # )
+            # edges = pd.DataFrame(edges, columns=["source", "target"])
+            # edges["length"] = edge_lengths
             morph.add_graph(
                 name="supermoxel_graph",
                 graph=(nodes, edges),
@@ -413,7 +419,7 @@ class MorphClient:
                 "supermoxel_graph",
                 "hks_features",
                 mapping=nodes.index.values,
-                reciprocal=True,
+                
             )
 
     def get_synapse_skeleton_mappings(self, supervoxel_ids, timestamp=None):
@@ -718,7 +724,7 @@ class MorphClient:
                 "mesh",
                 f"{self.model_target}_morphometry",
                 mapping=id_to_component_map,
-                reciprocal=True,
+                
             )
 
     def get_morphometry(self, root_ids):

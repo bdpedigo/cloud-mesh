@@ -36,7 +36,7 @@ QUEUE_NAME = os.environ.get("QUEUE_NAME", "ben-skedit")
 RUN = os.environ.get("RUN", False)
 REQUEST = os.environ.get("REQUEST", not RUN)
 LOGGING_LEVEL = os.environ.get("LOGGING_LEVEL", "ERROR")
-LEASE_SECONDS = int(os.environ.get("LEASE_SECONDS", 7200))
+LEASE_SECONDS = int(os.environ.get("LEASE_SECONDS", 1000))
 RECOMPUTE = bool(os.environ.get("RECOMPUTE", "False").lower() == "true")
 MAX_RETRIES = int(os.environ.get("MAX_RETRIES", 4))
 BACKOFF_FACTOR = int(os.environ.get("BACKOFF_FACTOR", 4))
@@ -105,16 +105,16 @@ def run_for_root(
         parameter_name=PARAMETER_NAME,
         select_label="spine",
         lookup_nucleus=False,
-        recompute=True,
+        recompute=RECOMPUTE,
         verbose=VERBOSE,
         n_jobs=N_JOBS,
         prediction_schema="new",
         timestamp=timestamp,
     )
-    morphology.condensed_features
+    # morphology.condensed_features
+    # morphology.pre_synapse_mappings
+    print(f"Working on {root_id} in {datastack} at {version}.")
     morphology.post_synapse_mappings
-    morphology.pre_synapse_mappings
-
     morphology.morphometry_summary
     # morphology.post_synapse_predictions
 
@@ -164,8 +164,11 @@ def stop_fn(executed):
         quit()
 
 
-# %%
-if RUN:
+# TEST = os.environ.get("TEST", "False").lower() == "true"
+TEST = False
+if TEST:
+    run_for_root(864691136913691121, "minnie65_phase3_v1", 1412)
+elif RUN:
     tq.poll(lease_seconds=LEASE_SECONDS, verbose=False, tally=False, stop_fn=stop_fn)
 
 # %%
@@ -236,7 +239,7 @@ if REQUEST:
 
         # root_ids = table.index.unique()
 
-    if False:
+    if True:
         import time
 
         from cloud_mesh import MorphClient
@@ -255,22 +258,26 @@ if REQUEST:
         )
         # neuron_table = neuron_table.query("pt_root_id != 0")
         root_ids = neuron_table["pt_root_id"].unique()
+        root_ids = np.random.permutation(root_ids)
+        tasks += [
+            partial(run_for_root, root_id, datastack, version) for root_id in root_ids
+        ]
         # root_ids = np.random.choice(root_ids, size=N_PER_BATCH, replace=False)
 
-        currtime = time.time()
-        mc = MorphClient(
-            "minnie65_phase3_v1",
-            hks_parameters="absolute-solo-yak",
-            verbose=VERBOSE,
-            n_jobs=N_JOBS,
-        )
+        # currtime = time.time()
+        # mc = MorphClient(
+        #     "minnie65_phase3_v1",
+        #     hks_parameters="absolute-solo-yak",
+        #     verbose=VERBOSE,
+        #     n_jobs=N_JOBS,
+        # )
 
-        has_hks = mc.has_hks(root_ids)
+        # has_hks = mc.has_hks(root_ids)
 
-        root_ids = root_ids[~has_hks]
-        print(len(root_ids), "morphs are missing HKS features.")
+        # root_ids = root_ids[~has_hks]
+        # print(len(root_ids), "morphs are missing HKS features.")
 
-    if True:
+    if False:
         datastack = "minnie65_phase3_v1"
         version = 1412
         client = CAVEclient(datastack, version=version)
@@ -393,9 +400,6 @@ if REQUEST:
     #     .tolist()
     # )
 
-
-# %%
-run_for_root(root_ids[0], "minnie65_phase3_v1", 1412)
 
 # %%
 # root_id = root_ids[-1]

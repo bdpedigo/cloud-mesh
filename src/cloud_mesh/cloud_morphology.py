@@ -484,6 +484,11 @@ class CloudMorphology:
     def mesh_predictions(self):
         out = self.condensed_predictions.loc[self.labels]
         return out.values
+    
+    @property
+    def mesh_features(self) -> pd.DataFrame:
+        out = self.condensed_features.loc[self.labels]
+        return out
 
     @property
     def condensed_posteriors(self):
