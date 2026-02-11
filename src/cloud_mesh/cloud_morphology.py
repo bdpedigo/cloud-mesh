@@ -161,7 +161,12 @@ class CloudMorphology:
     _component_path: Path = attrs.field(init=False, repr=False)
 
     def __attrs_post_init__(self):
-        path = Path(f"gs://bdp-ssa//{self.datastack}/{self.parameter_name}")
+        if self.datastack == "zheng_ca3":
+            path = Path(
+                f"gs://bdp-ssa//{self.datastack}/v{self.version}/{self.parameter_name}"
+            )
+        else:
+            path = Path(f"gs://bdp-ssa//{self.datastack}/{self.parameter_name}")
         self._path = path
         cf, _ = interpret_path(path)
         self._cf = cf
@@ -226,11 +231,12 @@ class CloudMorphology:
             datastack = self.datastack
             scale = self.scale
             client = self.client
+            version = self.version
 
             logging.info(f"Loading mesh for {root_id}")
             if datastack == "zheng_ca3":
                 cv = CloudVolume(
-                    "gs://zheng_mouse_hippocampus_production/v2/seg_m195",
+                    f"gs://zheng_mouse_hippocampus_production/v2/seg_m{version}",
                     progress=False,
                 )
                 raw_mesh = cv.mesh.get(root_id)[root_id]
@@ -484,7 +490,7 @@ class CloudMorphology:
     def mesh_predictions(self):
         out = self.condensed_predictions.loc[self.labels]
         return out.values
-    
+
     @property
     def mesh_features(self) -> pd.DataFrame:
         out = self.condensed_features.loc[self.labels]
@@ -553,9 +559,16 @@ class CloudMorphology:
         synapse_prediction_summary.dropna(how="any", inplace=True)
 
         if self.prediction_schema == "new":
-            synapse_prediction_path = f"gs://bdp-ssa/{datastack}/{self.parameter_name}/{self.model_name}/post-synapse-predictions/{root_id}.csv.gz"
+            synapse_prediction_path = (
+                self._path
+                / self.model_name
+                / "post-synapse-predictions"
+                / f"{root_id}.csv.gz"
+            )
         else:
-            synapse_prediction_path = f"gs://bdp-ssa/{datastack}/{self.parameter_name}/post-synapse-predictions/{root_id}.csv.gz"
+            synapse_prediction_path = (
+                self._path / "post-synapse-predictions" / f"{root_id}.csv.gz"
+            )
         put_dataframe(synapse_prediction_summary, synapse_prediction_path)
 
         self._post_synapse_predictions = synapse_prediction_summary

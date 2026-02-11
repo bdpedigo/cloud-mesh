@@ -13,18 +13,18 @@ gcloud config set project exalted-beanbag-334502
 # num-nodes: The number of nodes to be created in each of the cluster's zones.
 # --machine-type "c2d-standard-32" \
 # gcloud container --project "exalted-beanbag-334502" clusters delete "cloud-mesh" --zone "us-west1-b"
-gcloud container --project "exalted-beanbag-334502" clusters create "cloud-mesh-32x8" \
-    --zone "us-west1-a" \
+gcloud container --project "exalted-beanbag-334502" clusters create "cloud-mesh-16x2" \
+    --zone "us-west1-c" \
     --no-enable-basic-auth \
     --release-channel "stable" \
-    --machine-type "c2d-highmem-32" \
+    --machine-type "c2d-highmem-16" \
     --image-type "COS_CONTAINERD" \
     --disk-type "pd-standard" \
     --disk-size "600" \
     --metadata disable-legacy-endpoints=true \
     --scopes "https://www.googleapis.com/auth/devstorage.read_only","https://www.googleapis.com/auth/logging.write","https://www.googleapis.com/auth/monitoring","https://www.googleapis.com/auth/servicecontrol","https://www.googleapis.com/auth/service.management.readonly","https://www.googleapis.com/auth/trace.append" \
     --preemptible \
-    --num-nodes "8" \
+    --num-nodes "2" \
     --logging=SYSTEM,WORKLOAD \
     --monitoring=SYSTEM \
     --enable-ip-alias \
@@ -38,9 +38,9 @@ gcloud container --project "exalted-beanbag-334502" clusters create "cloud-mesh-
     --max-unavailable-upgrade 0 \
     --max-pods-per-node "256" \
     --enable-shielded-nodes \
-    --node-locations "us-west1-a"
+    --node-locations "us-west1-c"
 
-gcloud container clusters get-credentials --zone us-west1-a cloud-mesh-32x8
+gcloud container clusters get-credentials --zone us-west1-c cloud-mesh-16x2
 
 # https://kubernetes.io/docs/concepts/configuration/secret/
 kubectl create secret generic secrets \

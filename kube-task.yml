@@ -5,7 +5,7 @@ metadata:
     run: cloud-mesh
   name: cloud-mesh
 spec:
-  replicas: 256 # number of pods to run
+  replicas: 16 # number of pods to run
   selector:
     matchLabels:
       run: cloud-mesh
@@ -20,7 +20,7 @@ spec:
         run: cloud-mesh # metadata label attached to pod
     spec:
       containers:
-        - image: bdpedigo/cloud-mesh:v61 # image to pull from dockerhub
+        - image: bdpedigo/cloud-mesh:v63 # image to pull from dockerhub
           name: cloud-mesh # name of container in pod
           imagePullPolicy: Always
           command: ["/bin/sh"]
@@ -57,11 +57,11 @@ spec:
 
           resources:
             requests:
-              memory: 2.0Gi
+              memory: 4.0Gi # normal run at 2
               cpu: "900m"
               ephemeral-storage: "4Gi"
             limits:
-              memory: "24.0Gi"
+              memory: "32.0Gi" # normal run at 24
               ephemeral-storage: "16Gi"
           volumeMounts:
             - name: secrets-volume

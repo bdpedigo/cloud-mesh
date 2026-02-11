@@ -74,11 +74,13 @@ class MorphClient:
     def __init__(
         self,
         datastack: str,
+        version: Optional[int] = None,
         hks_parameters: Optional[str] = None,
         model_name: Optional[str] = None,
         model_target: Optional[str] = None,
         verbose: bool = True,
         n_jobs: int = 1,
+        mesh_cache: str = None,
         copy: bool = False,
     ):
         self.datastack = datastack
@@ -90,10 +92,16 @@ class MorphClient:
         self.n_jobs = n_jobs
         self._parallel = None
         self._cloudvolume = None
+        self.mesh_cache = mesh_cache
         self.copy = copy
 
         if hks_parameters is not None:
-            self.hks_base_path = f"gs://bdp-ssa/{datastack}/{hks_parameters}/"
+            if version is not None:
+                self.hks_base_path = (
+                    f"gs://bdp-ssa/{datastack}/v{version}/{hks_parameters}"
+                )
+            else:
+                self.hks_base_path = f"gs://bdp-ssa/{datastack}/{hks_parameters}"
             self.hks_cloudfiles = path_to_cloudfiles(
                 self.hks_base_path,
                 progress=self.verbose > 0,
@@ -349,7 +357,6 @@ class MorphClient:
                 f"{side}_synapses",
                 "mesh",
                 mapping=id_to_mesh_map,
-                
             )
 
     def get_supermoxel_graphs(self, root_ids):
@@ -419,7 +426,6 @@ class MorphClient:
                 "supermoxel_graph",
                 "hks_features",
                 mapping=nodes.index.values,
-                
             )
 
     def get_synapse_skeleton_mappings(self, supervoxel_ids, timestamp=None):
@@ -724,7 +730,6 @@ class MorphClient:
                 "mesh",
                 f"{self.model_target}_morphometry",
                 mapping=id_to_component_map,
-                
             )
 
     def get_morphometry(self, root_ids):

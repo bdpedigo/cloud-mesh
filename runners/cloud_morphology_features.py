@@ -42,7 +42,6 @@ MAX_RETRIES = int(os.environ.get("MAX_RETRIES", 4))
 BACKOFF_FACTOR = int(os.environ.get("BACKOFF_FACTOR", 4))
 BACKOFF_MAX = int(os.environ.get("BACKOFF_MAX", 120))
 MAX_RUNS = int(os.environ.get("MAX_RUNS", 5))
-USE_MODEL = False
 
 # logging.basicConfig(level="ERROR")
 
@@ -82,6 +81,42 @@ model_folder = Path(__file__).parent.parent / "models" / MODEL_NAME
 model_path = model_folder / f"{MODEL_VARIANT}.joblib"
 model = load(model_path)
 MODEL_KEY = f"{MODEL_NAME}-{MODEL_VARIANT}"
+# %%
+
+if False:
+    datastack = "zheng_ca3"
+    version = 357
+    root_ids = np.loadtxt(
+        "/Users/ben.pedigo/code/meshrep/cloud-mesh/data/zheng_ca3/ca3_object_selection_v357.txt",
+        dtype="str",
+    ).astype(np.int64)
+    root_ids = np.random.permutation(root_ids)
+
+    cf = CloudFiles(
+        "gs://bdp-ssa/zheng_ca3/v357/absolute-solo-yak/auburn-elk-detour-simple_hks_model/post-synapse-predictions"
+    )
+    exists = cf.exists([f"{root_id}.csv.gz" for root_id in root_ids])
+
+    exists_map = pd.Series(exists)
+    exists_map.index = exists_map.index.map(
+        lambda x: int(x.split("/")[-1].split(".")[0])
+    )
+    missing = exists_map[~exists_map].index
+
+    print(len(missing))
+
+    from cloud_mesh import MorphClient
+
+    mc = MorphClient(
+        "zheng_ca3",
+        hks_parameters="absolute-solo-yak",
+        verbose=VERBOSE,
+        n_jobs=N_JOBS,
+        model_name=MODEL_KEY,
+        model_target="spine",
+        version=version,
+    )
+    has_hks = mc.has_synapse_mesh_mappings(root_ids)
 
 
 # %%
@@ -114,11 +149,12 @@ def run_for_root(
     # morphology.condensed_features
     # morphology.pre_synapse_mappings
     print(f"Working on {root_id} in {datastack} at {version}.")
+    morphology.pre_synapse_mappings
     morphology.post_synapse_mappings
+    morphology.condensed_features
     morphology.morphometry_summary
-    # morphology.post_synapse_predictions
+    morphology.post_synapse_predictions
 
-    # morphology.pre_synapse_mappings
     # morphology.post_synapse_mappings
     # morphology.condensed_features
 
@@ -154,8 +190,10 @@ def run_for_root(
     return True
 
 
+
 # %%
 
+QUEUE_NAME = "ben-skedit"
 tq = TaskQueue(f"https://sqs.us-west-2.amazonaws.com/629034007606/{QUEUE_NAME}")
 
 
@@ -166,10 +204,19 @@ def stop_fn(executed):
 
 # TEST = os.environ.get("TEST", "False").lower() == "true"
 TEST = False
+RUN = False
+test_root = 648518346436877136
+test_root = 648518346427320208
+test_datastack = "zheng_ca3"
+test_version = 357
 if TEST:
-    run_for_root(864691136913691121, "minnie65_phase3_v1", 1412)
+    run_for_root(test_root, test_datastack, test_version)
 elif RUN:
     tq.poll(lease_seconds=LEASE_SECONDS, verbose=False, tally=False, stop_fn=stop_fn)
+
+# %%
+quit()
+
 
 # %%
 
@@ -239,11 +286,7 @@ if REQUEST:
 
         # root_ids = table.index.unique()
 
-    if True:
-        import time
-
-        from cloud_mesh import MorphClient
-
+    if False:
         datastack = "minnie65_phase3_v1"
         version = 1412
         client = CAVEclient(datastack, version=version)
@@ -376,6 +419,35 @@ if REQUEST:
             )
             for root_id in root_ids
         ]
+    if True:
+        datastack = "zheng_ca3"
+        version = 357
+        root_ids = np.loadtxt(
+            "/Users/ben.pedigo/code/meshrep/cloud-mesh/data/zheng_ca3/ca3_object_selection_v357.txt",
+            dtype="str",
+        ).astype(np.int64)
+        root_ids = np.random.permutation(root_ids)
+
+        # tasks += [
+        #     partial(
+        #         run_for_root,
+        #         root_id,
+        #         datastack,
+        #         version,
+        #         scale=1.0,
+        #         track_synapses=False,
+        #     )
+        #     for root_id in root_ids
+        # ]
+        tasks += [
+            partial(
+                run_for_root,
+                root_id,
+                datastack,
+                version,
+            )
+            for root_id in root_ids
+        ]
 
     if len(tasks) > 0:
         tq.insert(tasks)
@@ -400,48 +472,92 @@ if REQUEST:
     #     .tolist()
     # )
 
-
 # %%
-# root_id = root_ids[-1]
-# version = 1412
-# morphology = CloudMorphology(
-#     root_id=root_id,
-#     version=version,
-#     datastack=datastack,
-#     model_name=MODEL_KEY,
-#     model=model,
-#     parameters=parameters,
-#     parameter_name=PARAMETER_NAME,
-#     select_label="spine",
-#     lookup_nucleus=False,
-#     recompute=RECOMPUTE,
-#     verbose=VERBOSE,
-#     n_jobs=N_JOBS,
-#     prediction_schema="new",
-# )
-# morphology.morphometry_summary
-
+tasks = [
+    partial(
+        run_for_root,
+        root_id,
+        datastack,
+        version,
+    )
+    for root_id in missing
+]
+tq.insert(tasks)
 # %%
-# from nglui.statebuilder import ViewerState
+if TEST:
+    root_id = test_root
+    version = test_version
+    datastack = test_datastack
+    morphology = CloudMorphology(
+        root_id=root_id,
+        version=version,
+        datastack=datastack,
+        model_name=MODEL_KEY,
+        model=model,
+        parameters=parameters,
+        parameter_name=PARAMETER_NAME,
+        select_label="spine",
+        lookup_nucleus=False,
+        recompute=RECOMPUTE,
+        verbose=VERBOSE,
+        n_jobs=N_JOBS,
+        prediction_schema="new",
+    )
+    morphology.morphometry_summary
 
-# morphometry_summary = morphology.morphometry_summary.copy().sort_values(
-#     "n_post_synapses", ascending=False
-# )
-# morphometry_summary["point"] = morphometry_summary[["x", "y", "z"]].values.tolist()
-# vs = (
-#     ViewerState(client=client)
-#     .add_layers_from_client()
-#     .add_segments([root_id])
-#     .add_points(
-#         morphometry_summary,
-#         name="spines",
-#         point_column="point",
-#         description_column="n_post_synapses",
-#         data_resolution=[1, 1, 1],
-#         swap_visible_segments_on_move=False
-#     )
-# )
-# vs.to_browser(shorten=True, browser="firefox")
+    from nglui.statebuilder import ViewerState
+
+    predictions = morphology.post_synapse_predictions
+    positions = morphology.mesh[0][morphology.post_synapse_mappings]
+    positions = pd.DataFrame(
+        positions, columns=["x", "y", "z"], index=morphology.post_synapse_mappings.index
+    )
+    predictions = predictions.join(positions, how="inner")
+    predictions["point"] = predictions[["x", "y", "z"]].values.tolist()
+
+    vs = (
+        ViewerState(client=morphology.client)
+        .add_layers_from_client()
+        .add_segments([root_id])
+        .add_points(
+            predictions.query("pred_label == 'spine'"),
+            name="spines",
+            point_column="point",
+            data_resolution=[1, 1, 1],
+            swap_visible_segments_on_move=False,
+            color="#FF00CC",
+        )
+        .add_points(
+            predictions.query("pred_label == 'not_spine'"),
+            name="not_spines",
+            point_column="point",
+            data_resolution=[1, 1, 1],
+            swap_visible_segments_on_move=False,
+            color="#E5FF00",
+        )
+    )
+
+    vs.to_browser(shorten=True, browser="firefox")
+
+    morphometry_summary = morphology.morphometry_summary.copy().sort_values(
+        "n_post_synapses", ascending=False
+    )
+    morphometry_summary["point"] = morphometry_summary[["x", "y", "z"]].values.tolist()
+    vs = (
+        ViewerState(client=morphology.client)
+        .add_layers_from_client()
+        .add_segments([root_id])
+        .add_points(
+            morphometry_summary,
+            name="spines",
+            point_column="point",
+            description_column="n_post_synapses",
+            data_resolution=[1, 1, 1],
+            swap_visible_segments_on_move=False,
+            color="#FF00CC",
+        )
+    )
+    vs.to_browser(shorten=True, browser="firefox")
 
 
 # %%
