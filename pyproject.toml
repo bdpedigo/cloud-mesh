@@ -1,9 +1,9 @@
 [project]
 dependencies = [
     "cave-mapper",
-    "caveclient>=7.2.1",
+    "caveclient[cv]>=7.0.0,<8.0.0",
     "cloud-files>=4.27.0",
-    "cloud-volume>=11.0.2",
+    "cloud-volume>=12.12.0",
     "cloudigo",
     "fast-simplification>=0.1.12",
     "joblib>=1.4.2",

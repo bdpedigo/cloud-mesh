@@ -88,6 +88,11 @@ parameter_folder = Path(__file__).parent.parent / "models" / PARAMETER_NAME
 parameters = toml.load(parameter_folder / "parameters.toml")
 parameters = replace_none(parameters)
 
+CAGED_PARAMETER_NAME = "internal-mud-secure"
+parameter_folder = Path(__file__).parent.parent / "models" / CAGED_PARAMETER_NAME
+caged_parameters = toml.load(parameter_folder / "parameters.toml")
+caged_parameters = replace_none(caged_parameters)
+
 model_folder = Path(__file__).parent.parent / "models" / MODEL_NAME
 model_path = model_folder / f"{MODEL_VARIANT}.joblib"
 model = load(model_path)
@@ -131,6 +136,12 @@ if False:
 
 
 # %%
+from caveclient import CAVEclient
+
+client = CAVEclient("h01_c3_flat")
+client.info.get_datastack_info()
+
+# %%
 
 
 def emit_link(morphology):
@@ -155,12 +166,20 @@ def emit_link(morphology):
             color="#FF00CC",
         )
         .add_points(
-            predictions.query("pred_label != 'spine'"),
-            name="not_spines",
+            predictions.query("pred_label == 'shaft'"),
+            name="shaft",
             point_column="point",
             data_resolution=[1, 1, 1],
             swap_visible_segments_on_move=False,
             color="#E5FF00",
+        )
+        .add_points(
+            predictions.query("pred_label == 'soma'"),
+            name="soma",
+            point_column="point",
+            data_resolution=[1, 1, 1],
+            swap_visible_segments_on_move=False,
+            color="#00FFFF",
         )
     )
     link = vs.to_url(shorten=True)
@@ -173,6 +192,7 @@ def run_for_root(
     datastack: str,
     version: int,
     timestamp: Optional[datetime.datetime] = None,
+    test: bool = False,
 ):
     # total_time = time.time()
     morphology = CloudMorphology(
@@ -184,59 +204,63 @@ def run_for_root(
         parameters=parameters,
         parameter_name=PARAMETER_NAME,
         select_label="spine",
-        lookup_nucleus=False,
-        recompute=True,
-        verbose=VERBOSE,
-        n_jobs=N_JOBS,
+        lookup_nucleus=True,
+        recompute=RECOMPUTE,
+        verbose=VERBOSE if not test else True,
+        n_jobs=N_JOBS if not test else -1,
         prediction_schema="new",
         timestamp=timestamp,
+        cage=False,
     )
-    # morphology.condensed_features
-    # morphology.pre_synapse_mappings
-    # print(f"Working on {root_id} in {datastack} at {version}.")
     morphology.pre_synapse_mappings
     morphology.post_synapse_mappings
     morphology.condensed_features
     morphology.morphometry_summary
     morphology.post_synapse_predictions
 
-    if LINK_PROB > 0 and np.random.rand() < LINK_PROB:
+    if (LINK_PROB > 0 and np.random.rand() < LINK_PROB) or test:
         emit_link(morphology)
-
-    # morphology.post_synapse_mappings
-    # morphology.condensed_features
-
-    # morphology.post_synapse_predictions
-
-    # synapse_time = time.time()
-    # morphology.pre_synapse_mapping
-    # synapse_time = time.time() - synapse_time
-
-    # feature_time = time.time()
-    # morphology.condensed_features
-    # feature_time = time.time() - feature_time
-
-    # total_time = time.time() - total_time
-
-    # if morphology._mesh is not None:
-    #     timing_dict = {}
-    #     timing_dict["root_id"] = str(root_id)
-    #     timing_dict["n_vertices"] = morphology.mesh[0].shape[0]
-    #     timing_dict["n_faces"] = morphology.mesh[1].shape[0]
-    #     timing_dict['n_pre_synapses'] = len(morphology.pre_synapse_mapping)
-    #     timing_dict["synapse_time"] = synapse_time
-    #     timing_dict["feature_time"] = feature_time
-    #     timing_dict["total_time"] = total_time
-    #     timing_dict["timestamp"] = time.time()
-
-    #     path = Path(f"gs://bdp-ssa//{datastack}/{MODEL_NAME}")
-
-    #     cf, _ = interpret_path(path)
-
-    #     cf.put_json(f"pre_object_timings/{root_id}.json", timing_dict)
 
     return True
 
+
+@queueable
+def run_for_root_caged(
+    root_id: int,
+    datastack: str,
+    version: int,
+    timestamp: Optional[datetime.datetime] = None,
+    test: bool = False,
+):
+    # total_time = time.time()
+    morphology = CloudMorphology(
+        root_id=root_id,
+        version=version,
+        datastack=datastack,
+        parameters=caged_parameters,
+        parameter_name=CAGED_PARAMETER_NAME,
+        lookup_nucleus=True,
+        recompute=RECOMPUTE,
+        verbose=VERBOSE if not test else True,
+        n_jobs=N_JOBS if not test else -1,
+        timestamp=timestamp,
+        cage=True,
+    )
+    morphology.cage_mesh
+    morphology.condensed_features
+
+    return morphology
+
+
+RECOMPUTE = False
+
+
+test_root = 864691132355457423
+test_datastack = "h01_c3_flat"
+test_version = 1053
+morphology = run_for_root_caged(test_root, test_datastack, test_version, test=True)
+morphology.cage_mesh
+morphology._cage_mapping
 
 # %%
 
@@ -279,8 +303,6 @@ root_ids = np.random.permutation(root_ids)
 mc.has_hks(root_ids[:100])
 # %%
 
-# %%
-# quit()
 
 # %%
 

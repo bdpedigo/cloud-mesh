@@ -3,17 +3,19 @@ import logging
 import os
 import sys
 import traceback
+from io import BytesIO
 from pathlib import Path
 from typing import Any, Optional, Union
 
 import attrs
+import meshio
 import numpy as np
 import pandas as pd
 import requests
 from cave_mapper import map_points
 from caveclient import CAVEclient, set_session_defaults
 from cloudfiles import CloudFiles
-from cloudvolume import CloudVolume
+from cloudvolume import CloudVolume, from_cloudpath
 
 from cloudigo import exists, get_dataframe, put_dataframe
 from meshmash import (
@@ -22,6 +24,7 @@ from meshmash import (
     find_nucleus_point,
     get_synapse_mapping,
     interpret_path,
+    project_points_to_mesh,
     read_array,
     read_condensed_features,
     read_condensed_graph,
@@ -31,6 +34,7 @@ from meshmash import (
     save_condensed_graph,
     save_id_to_mesh_map,
     scale_mesh,
+    wrap_mesh,
 )
 
 MAX_RETRIES = int(os.environ.get("MAX_RETRIES", 5))
@@ -66,6 +70,20 @@ def loggable(func):
             raise e
 
     return wrapper
+
+
+def _write_mesh_to_bytes(mesh, file_format="ply") -> bytes:
+    vertices, faces = mesh
+    mesh_bytes = BytesIO()
+    meshio_mesh = meshio.Mesh(
+        points=vertices,
+        cells=[("triangle", faces)],
+    )
+
+    meshio_mesh.write(mesh_bytes, file_format=file_format)
+    mesh_bytes.seek(0)
+    mesh_bytes = mesh_bytes.read()
+    return mesh_bytes
 
 
 @attrs.define
@@ -118,6 +136,7 @@ class CloudMorphology:
     recompute: bool = attrs.field(default=False, repr=True)
     verbose: bool = attrs.field(default=False, repr=True, init=True)
     n_jobs: int = attrs.field(default=-2, repr=True, init=True)
+    cage: bool = attrs.field(default=False, repr=True, init=True)
 
     # depdends on datastack and parameter_name
     _path: Path = attrs.field(init=False, repr=False)
@@ -126,6 +145,9 @@ class CloudMorphology:
 
     # depends on root_id, datastack, scale, and parameters
     _mesh: tuple = attrs.field(init=False, default=None, repr=False)
+    _cage_mesh: tuple = attrs.field(init=False, default=None, repr=False)
+    _cage_mapping: np.ndarray = attrs.field(init=False, default=None, repr=False)
+    _cage_distances: np.ndarray = attrs.field(init=False, default=None, repr=False)
     _pre_synapse_mappings: np.ndarray = attrs.field(
         init=False, default=None, repr=False
     )
@@ -169,7 +191,7 @@ class CloudMorphology:
             path = Path(f"gs://bdp-ssa//{self.datastack}/{self.parameter_name}")
         self._path = path
         cf, _ = interpret_path(path)
-        self._cf = cf
+        self._cf: CloudFiles = cf
 
         if self.prediction_schema == "new":
             self._post_synapse_target_path = (
@@ -242,6 +264,11 @@ class CloudMorphology:
                 raw_mesh = cv.mesh.get(root_id)[root_id]
                 raw_mesh = raw_mesh.deduplicate_vertices(is_chunk_aligned=True)
                 raw_mesh = (raw_mesh.vertices, raw_mesh.faces)
+            elif datastack == "j0251":
+                mesh_source = from_cloudpath(
+                    "precomputed://https://syconn.esc.mpcdf.mpg.de/notebook/j0251/72_seg_20210127_agglo2_syn_20220811_celltypes_20230822/sv"
+                )
+                raw_mesh = mesh_source.get(root_id)[root_id]
             else:
                 cv = client.info.segmentation_cloudvolume(progress=False)
                 raw_mesh = cv.mesh.get(root_id, **self.parameters["cv-mesh-get"])[
@@ -256,7 +283,64 @@ class CloudMorphology:
                 raw_mesh = scale_mesh(raw_mesh, scale)
 
             self._mesh = raw_mesh
+
         return self._mesh
+
+    @property
+    @loggable
+    def cage_mesh(self):
+        if self.cage and self._cage_mesh is None:
+            root_id = self.root_id
+            wrapped_mesh_file = self._path / "wrapped_meshes" / f"{root_id}.ply"
+            if not exists(wrapped_mesh_file) or self.recompute:
+                logging.info(f"Wrapping mesh for {root_id}")
+
+                wrapped_mesh = wrap_mesh(self.mesh, **self.parameters["wrap_mesh"])
+
+                mapping, distances = project_points_to_mesh(
+                    self.mesh[0],
+                    wrapped_mesh,
+                    distance_threshold=None,
+                    return_distances=True,
+                )
+
+                save_array(f"wrapped_mesh_mappings/{root_id}.npz", mapping)
+                save_array(f"wrapped_mesh_distances/{root_id}.npz", distances)
+
+                mesh_bytes = _write_mesh_to_bytes(wrapped_mesh)
+                self._cf.put(f"wrapped_meshes/{root_id}.ply", mesh_bytes)
+
+                logging.info(f"Saved wrapped mesh for {root_id}")
+            else:
+                logging.info(f"Found wrapped mesh for {root_id}")
+                wrapped_mesh_bytes = self._cf.get(f"wrapped_meshes/{root_id}.ply")
+                wrapped_mesh_bytes = BytesIO(wrapped_mesh_bytes)
+                wrapped_mesh = meshio.read(wrapped_mesh_bytes, file_format="ply")
+                wrapped_mesh = (
+                    wrapped_mesh.points,
+                    wrapped_mesh.cells_dict["triangle"],
+                )
+                mapping = read_array(f"wrapped_mesh_mappings/{root_id}.npz")
+                distances = read_array(f"wrapped_mesh_distances/{root_id}.npz")
+
+            self._cage_mesh = wrapped_mesh
+            self._cage_mapping = mapping
+            self._cage_distances = distances
+
+            return self._cage_mesh
+        elif self.cage:
+            return self._cage_mesh
+        else:
+            raise ValueError(
+                "Cage mesh is not enabled for this morphology, set cage=True to enable"
+            )
+
+    @property
+    def compute_mesh(self):
+        if self.cage:
+            return self.cage_mesh
+        else:
+            return self.mesh
 
     @property
     @loggable
@@ -360,7 +444,7 @@ class CloudMorphology:
 
     @loggable
     def _hks_pipeline(self):
-        mesh = self.mesh
+        mesh = self.compute_mesh
         nuc_point = self.nuc_point
         verbose = self.verbose
         n_jobs = self.n_jobs
@@ -468,7 +552,15 @@ class CloudMorphology:
             )
 
         condensed_features = condensed_features[model.feature_names_in_]
-        condensed_features = condensed_features.dropna(axis=0, how="any")
+
+        if "distance_to_nucleus" in condensed_features.columns:
+            # HACK this is fixing a case where some floating point issues existed and
+            # node features for distance look bizarre
+            x = condensed_features["distance_to_nucleus"]
+            mask = (x < 1e-10) | (x > 1e12)
+            condensed_features.loc[mask, "distance_to_nucleus"] = np.nan
+
+        condensed_features = condensed_features.dropna(axis=0, how="all")
 
         condensed_posteriors = model.predict_proba(condensed_features)
         condensed_posteriors = pd.DataFrame(
@@ -518,7 +610,6 @@ class CloudMorphology:
     def _post_target_prediction(self):
         root_id = self.root_id
         condensed_ids = self.labels
-        datastack = self.datastack
 
         condensed_predictions = self.condensed_predictions
         condensed_posteriors = self.condensed_posteriors
@@ -608,23 +699,23 @@ class CloudMorphology:
             bound_volume_threshold=bound_volume_threshold,
             verbose=self.verbose,
         )
-
-        points = morphometry_summary[["x", "y", "z"]].values
-        mask = np.isfinite(points).all(axis=1)
-        points = points[mask]
-        mapping_info = map_points(
-            points,
-            self.root_id,
-            self.client,
-            initial_distance=0,
-            max_distance=4,
-            verbose=self.verbose,
-        )
-        mapping_info.index = morphometry_summary.index[mask]
-        morphometry_summary = morphometry_summary.join(
-            mapping_info[["voxel_pt_x", "voxel_pt_y", "voxel_pt_z"]],
-            how="left",
-        )
+        if len(morphometry_summary) != 0:
+            points = morphometry_summary[["x", "y", "z"]].values
+            mask = np.isfinite(points).all(axis=1)
+            points = points[mask]
+            mapping_info = map_points(
+                points,
+                self.root_id,
+                self.client,
+                initial_distance=0,
+                max_distance=4,
+                verbose=self.verbose,
+            )
+            mapping_info.index = morphometry_summary.index[mask]
+            morphometry_summary = morphometry_summary.join(
+                mapping_info[["voxel_pt_x", "voxel_pt_y", "voxel_pt_z"]],
+                how="left",
+            )
 
         put_dataframe(morphometry_summary, self._morpohmetry_summary_path)
 

@@ -16,7 +16,7 @@ def get_hue_info(layer, hue, clim, cmap=None):
 
     if cmap is not None and isinstance(cmap, dict):
         colors = np.array([cmap[val] for val in scalars])
-        if colors.max() > 1: # assume 0-255
+        if colors.max() > 1:  # assume 0-255
             colors = colors / 255.0
         return colors, None
 
@@ -32,7 +32,22 @@ def get_hue_info(layer, hue, clim, cmap=None):
         val = max(abs(low), abs(high))
         low, high = -val, val
     clim = (low, high)
+
+    if scalars.dtype.isin([np.float16]):
+        scalars = scalars.astype(np.float32)
     return scalars, clim
+
+
+def project_points(points, projection="identity"):
+    if projection == "identity":
+        return points
+    elif projection == "pca-tall":
+        from sklearn.decomposition import PCA
+
+        pca = PCA(n_components=3)
+        projected_points = pca.fit_transform(points)
+        projected_points = projected_points[:, [1, 0, 2]]
+        return projected_points
 
 
 class MorphPlotter(pv.Plotter):
@@ -53,21 +68,33 @@ class MorphPlotter(pv.Plotter):
                 **kwargs,
             )
 
-    def add_graph_layer(self, morph, layer_name="graph", hue=None, clim=None, **kwargs):
+    def add_graph_layer(
+        self,
+        morph,
+        layer_name="graph",
+        hue=None,
+        clim=None,
+        projection="identity",
+        **kwargs,
+    ):
         if (
             morph.has_layer(layer_name)
             and morph.get_layer(layer_name).is_spatially_valid
         ):
             graph_layer = morph.get_layer(layer_name)
             lines = edges_to_lines(graph_layer.facets_positional)
-            line_poly = pv.PolyData(graph_layer.vertices, lines=lines)
-            scalars, clim = get_hue_info(graph_layer, hue, clim)
+            vertices = project_points(graph_layer.vertices, projection=projection)
+            line_poly = pv.PolyData(vertices, lines=lines)
+            if clim is None:
+                scalars, clim = get_hue_info(graph_layer, hue, clim)
+            else:
+                scalars, _ = get_hue_info(graph_layer, hue, clim)
             super().add_mesh(
                 line_poly,
                 # name=layer_name,
                 scalars=scalars,
                 clim=clim,
-                scalar_bar_args={"title": hue} if isinstance(hue, str) else None,
+                # scalar_bar_args={"title": hue} if isinstance(hue, str) else None,
                 **kwargs,
             )
 
@@ -121,7 +148,7 @@ class MorphPlotter(pv.Plotter):
             self.add_mesh(
                 glyphs,
                 # scalars="scalars",
-                scalars='GlyphVector',
+                scalars="GlyphVector",
                 # rgb=True,
                 clim=clim,
                 scalar_bar_args={"title": hue} if isinstance(hue, str) else None,

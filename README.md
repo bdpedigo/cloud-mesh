@@ -31,3 +31,5 @@ Check for issues with the cluster:
 
 Mount a local file to configmap: 
 `kubectl create configmap script --from-file ./runners/dfts_and_inference2.py`
+
+<!-- gcloud auth activate-service-account --key-file=/Users/ben.pedigo/.cloudvolume/secrets/google-secret.json -->
