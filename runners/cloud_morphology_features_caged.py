@@ -5,12 +5,12 @@ warnings.filterwarnings("ignore", category=SyntaxWarning)
 warnings.filterwarnings(
     "ignore", category=RuntimeWarning, message="divide by zero encountered in log"
 )
-
 import datetime
 import json
 import logging
 import os
 import platform
+import time
 from functools import partial
 from pathlib import Path
 from typing import Optional
@@ -21,7 +21,7 @@ import requests
 import toml
 import urllib3
 from cloud_mesh import CloudMorphology
-from cloudfiles import CloudFiles
+from cloudfiles import CloudFile
 from joblib import load
 from nglui.statebuilder import ViewerState
 from taskqueue import TaskQueue, queueable
@@ -52,7 +52,7 @@ BACKOFF_FACTOR = int(os.environ.get("BACKOFF_FACTOR", 4))
 BACKOFF_MAX = int(os.environ.get("BACKOFF_MAX", 120))
 MAX_RUNS = int(os.environ.get("MAX_RUNS", 100))
 TEST = bool(os.environ.get("TEST", "False").lower() == "true")
-LINK_PROB = float(os.environ.get("LINK_PROB", 0.0001))  # 1 in 10,000
+LINK_PROB = float(os.environ.get("LINK_PROB", 0.1))  # 1 in 10
 
 # logging.basicConfig(level="ERROR")
 
@@ -97,49 +97,7 @@ model_folder = Path(__file__).parent.parent / "models" / MODEL_NAME
 model_path = model_folder / f"{MODEL_VARIANT}.joblib"
 model = load(model_path)
 MODEL_KEY = f"{MODEL_NAME}-{MODEL_VARIANT}"
-# %%
 
-if False:
-    datastack = "zheng_ca3"
-    version = 357
-    root_ids = np.loadtxt(
-        "/Users/ben.pedigo/code/meshrep/cloud-mesh/data/zheng_ca3/ca3_object_selection_v357.txt",
-        dtype="str",
-    ).astype(np.int64)
-    root_ids = np.random.permutation(root_ids)
-
-    cf = CloudFiles(
-        "gs://bdp-ssa/zheng_ca3/v357/absolute-solo-yak/auburn-elk-detour-simple_hks_model/post-synapse-predictions"
-    )
-    exists = cf.exists([f"{root_id}.csv.gz" for root_id in root_ids])
-
-    exists_map = pd.Series(exists)
-    exists_map.index = exists_map.index.map(
-        lambda x: int(x.split("/")[-1].split(".")[0])
-    )
-    missing = exists_map[~exists_map].index
-
-    print(len(missing))
-
-    from cloud_mesh import MorphClient
-
-    mc = MorphClient(
-        "zheng_ca3",
-        hks_parameters="absolute-solo-yak",
-        verbose=VERBOSE,
-        n_jobs=N_JOBS,
-        model_name=MODEL_KEY,
-        model_target="spine",
-        version=version,
-    )
-    has_hks = mc.has_synapse_mesh_mappings(root_ids)
-
-
-# %%
-from caveclient import CAVEclient
-
-client = CAVEclient("h01_c3_flat")
-client.info.get_datastack_info()
 
 # %%
 
@@ -214,18 +172,33 @@ def run_for_root(
     )
     morphology.pre_synapse_mappings
     morphology.post_synapse_mappings
+    currtime = time.time()
     morphology.condensed_features
+    feature_time = time.time() - currtime
     morphology.morphometry_summary
     morphology.post_synapse_predictions
 
     if (LINK_PROB > 0 and np.random.rand() < LINK_PROB) or test:
         emit_link(morphology)
 
+    if morphology._mesh is not None and not test:
+        timing_dict = {}
+        timing_dict["root_id"] = str(root_id)
+        timing_dict["n_vertices"] = morphology.mesh[0].shape[0]
+        timing_dict["n_faces"] = morphology.mesh[1].shape[0]
+        timing_dict["feature_time"] = feature_time
+        timing_dict["timestamp"] = time.time()
+
+        cf = CloudFile(
+            f"gs://bdp-ssa//{datastack}/{PARAMETER_NAME}/timings/{root_id}.json"
+        )
+        cf.put_json(timing_dict)
+
     return True
 
 
 @queueable
-def run_for_root_caged(
+def run_for_root(
     root_id: int,
     datastack: str,
     version: int,
@@ -237,9 +210,63 @@ def run_for_root_caged(
         root_id=root_id,
         version=version,
         datastack=datastack,
+        model_name=MODEL_KEY,
+        model=model,
+        parameters=parameters,
+        parameter_name=PARAMETER_NAME,
+        select_label="spine",
+        lookup_nucleus=True,
+        recompute=RECOMPUTE,
+        verbose=VERBOSE if not test else True,
+        n_jobs=N_JOBS if not test else -1,
+        prediction_schema="new",
+        timestamp=timestamp,
+        cage=False,
+    )
+    morphology.pre_synapse_mappings
+    morphology.post_synapse_mappings
+    currtime = time.time()
+    morphology.condensed_features
+    feature_time = time.time() - currtime
+    morphology.morphometry_summary
+    morphology.post_synapse_predictions
+
+    if (LINK_PROB > 0 and np.random.rand() < LINK_PROB) or test:
+        emit_link(morphology)
+
+    if morphology._mesh is not None and not test:
+        timing_dict = {}
+        timing_dict["root_id"] = str(root_id)
+        timing_dict["n_vertices"] = morphology.mesh[0].shape[0]
+        timing_dict["n_faces"] = morphology.mesh[1].shape[0]
+        timing_dict["feature_time"] = feature_time
+        timing_dict["timestamp"] = time.time()
+
+        cf = CloudFile(
+            f"gs://bdp-ssa//{datastack}/{PARAMETER_NAME}/timings/{root_id}.json"
+        )
+        cf.put_json(timing_dict)
+
+    return True
+
+
+@queueable
+def run_for_root_caged(
+    root_id: int,
+    datastack: str,
+    version: int,
+    timestamp: Optional[datetime.datetime] = None,
+    lookup_nucleus=True,
+    test: bool = False,
+):
+    # total_time = time.time()
+    morphology = CloudMorphology(
+        root_id=root_id,
+        version=version,
+        datastack=datastack,
         parameters=caged_parameters,
         parameter_name=CAGED_PARAMETER_NAME,
-        lookup_nucleus=True,
+        lookup_nucleus=lookup_nucleus,
         recompute=RECOMPUTE,
         verbose=VERBOSE if not test else True,
         n_jobs=N_JOBS if not test else -1,
@@ -247,20 +274,48 @@ def run_for_root_caged(
         cage=True,
     )
     morphology.cage_mesh
+    currtime = time.time()
     morphology.condensed_features
+    feature_time = time.time() - currtime
 
-    return morphology
+    if morphology._mesh is not None and not test:
+        timing_dict = {}
+        timing_dict["root_id"] = str(root_id)
+        timing_dict["n_vertices"] = morphology.mesh[0].shape[0]
+        timing_dict["n_faces"] = morphology.mesh[1].shape[0]
+        timing_dict["feature_time"] = feature_time
+        timing_dict["timestamp"] = time.time()
+
+        cf = CloudFile(
+            f"gs://bdp-ssa//{datastack}/{CAGED_PARAMETER_NAME}/timings/{root_id}.json"
+        )
+        cf.put_json(timing_dict)
+    if test:
+        return morphology
+    else:
+        return True
 
 
-RECOMPUTE = False
+# test_root = 864691132355457423
+# test_datastack = "h01_c3_flat"
+# test_version = 1054
+# morphology = run_for_root_caged(test_root, test_datastack, test_version, test=True)
+# morphology.cage_mesh
+# morphology._cage_mapping
 
-
-test_root = 864691132355457423
-test_datastack = "h01_c3_flat"
-test_version = 1053
-morphology = run_for_root_caged(test_root, test_datastack, test_version, test=True)
+test_root = 16264492
+test_datastack = "j0251"
+test_version = 0
+morphology = run_for_root_caged(
+    test_root, test_datastack, test_version, test=True, lookup_nucleus=False
+)
 morphology.cage_mesh
-morphology._cage_mapping
+
+# %%
+
+
+# %%
+
 
 # %%
 
@@ -282,287 +337,141 @@ elif RUN:
     print("Polling...")
     tq.poll(lease_seconds=LEASE_SECONDS, verbose=False, tally=False, stop_fn=stop_fn)
 
-# %%
-
-import polars as pl
-from cloud_mesh import MorphClient
-
-mc = MorphClient(
-    "v1dd",
-    version=1196,
-    hks_parameters="absolute-solo-yak",
-    verbose=VERBOSE,
-    n_jobs=N_JOBS,
-    model_name=MODEL_KEY,
-    model_target="spine",
-)
-
-root_ids = pl.read_parquet("v1dd_root_selections.parquet")
-root_ids = root_ids["post_pt_root_id"].unique().to_numpy()
-root_ids = np.random.permutation(root_ids)
-mc.has_hks(root_ids[:100])
-# %%
-
 
 # %%
-
-
 if REQUEST:
-    import pandas as pd
-    import polars as pl
+    datastack_to_version = {"h01_c3_flat": 1054, "minnie65_phase3_v1": 1718}
+
+    from pathlib import Path
+
+    import numpy as np
     from caveclient import CAVEclient
-    from cloud_mesh import MorphClient
-    from cloudfiles import CloudFiles
+
+    from meshrep import make_label_table
+
+    #
+    # Microns
+    #
+
+    microns_version = datastack_to_version["minnie65_phase3_v1"]
+    microns_labels = make_label_table(
+        "now",
+        root_version=microns_version,
+        threshold=100,
+    )
+
+    microns_labeled_ids = (
+        microns_labels.groupby(f"pt_root_id_{microns_version}")
+        .size()
+        .rename("count")
+        .sort_values(ascending=False)
+        .iloc[:200]
+    ).to_frame()
+
+    client = CAVEclient("minnie65_phase3_v1", version=microns_version)
+    info = client.materialize.views.aibs_cell_info().query()
+    info = info.set_index("pt_root_id").sort_index()
+
+    microns_labeled_ids = microns_labeled_ids.join(info[["broad_type"]], how="left")
+
+    microns_keep_ids = microns_labeled_ids.query("broad_type == 'excitatory'").index[
+        :80
+    ]
+
+    microns_random_ids = (
+        info.query("broad_type == 'excitatory' and ~pt_root_id.isin(@microns_keep_ids)")
+        .sample(80, random_state=8888)
+        .index
+    )
+
+    #
+    # H01
+    #
+    h01_version = datastack_to_version["h01_c3_flat"]
+    h01_id_path = Path("/Users/ben.pedigo/code/meshrep/validation_ids.txt")
+
+    client = CAVEclient("h01_c3_flat", version=h01_version)
+
+    cell_types_table = client.materialize.query_table(table="cells")
+    cell_types_table = cell_types_table.sort_values("pt_root_id")
+
+    pyramidal_cell_types = cell_types_table.query(
+        "cell_type == 'PYRAMIDAL' and pt_root_id != 0"
+    )
+
+    validation_ids = pyramidal_cell_types.sample(500, random_state=8888)[
+        "pt_root_id"
+    ].values
+
+    loaded_validation_ids = np.loadtxt("validation_ids.txt", dtype="int64")
+
+    assert np.array_equal(np.sort(validation_ids), np.sort(loaded_validation_ids))
+
+    h01_labeled_ids = validation_ids[:80]
+
+    h01_random_ids = (
+        pyramidal_cell_types.query("pt_root_id not in @validation_ids")
+        .sample(80, random_state=8888)["pt_root_id"]
+        .values
+    )
+
+    #
+    # j0251
+    #
+
+    params = {
+        "celltype": "MSN",
+        "min_dendrite_length": "200.0",
+    }
+    base_url = "https://syconn.esc.mpcdf.mpg.de"
+    response = requests.get(f"{base_url}/j0251/neurons/json", params=params)
+    neurons = response.json()
+    neuron_ids = np.sort(neurons["neuron_ids"])
+
+    rng = np.random.default_rng(8888)
+    j0251_keep_ids = rng.choice(neuron_ids, size=80, replace=False)
 
     tasks = []
 
-    if True:
-        datastack = "v1dd"
-        version = 1196
-        root_ids = pl.read_parquet("v1dd_root_selections.parquet")
-        root_ids = root_ids["post_pt_root_id"].unique().to_numpy()
-        root_ids = np.random.permutation(root_ids)
-        path = "gs://bdp-ssa/v1dd/absolute-solo-yak/features"
-        queries = [f"{root_id}.npz" for root_id in root_ids]
-        cf = CloudFiles(path)
-        does_exist = cf.exists(queries)
-        exists_indicator = np.vectorize(does_exist.get)(queries)
-        root_ids = root_ids[~exists_indicator]
-        tasks += [
-            partial(
-                run_for_root,
-                root_id,
-                datastack,
-                version,
-            )
-            for root_id in root_ids
-        ]
-
-    if False:
-        cell_table = pd.read_feather(
-            "/Users/ben.pedigo/code/meshrep/cloud-mesh/data/v1dd_single_neuron_soma_ids.feather"
+    for root_id in microns_keep_ids:
+        tasks.append(
+            partial(run_for_root, root_id, "minnie65_phase3_v1", microns_version)
+        )
+        tasks.append(
+            partial(run_for_root_caged, root_id, "minnie65_phase3_v1", microns_version)
+        )
+    for root_id in microns_random_ids:
+        tasks.append(
+            partial(run_for_root, root_id, "minnie65_phase3_v1", microns_version)
+        )
+        tasks.append(
+            partial(run_for_root_caged, root_id, "minnie65_phase3_v1", microns_version)
         )
 
-        root_ids = np.unique(cell_table["pt_root_id"])
+    for root_id in h01_labeled_ids:
+        tasks.append(partial(run_for_root, root_id, "h01_c3_flat", h01_version))
+        tasks.append(partial(run_for_root_caged, root_id, "h01_c3_flat", h01_version))
+    for root_id in h01_random_ids:
+        tasks.append(partial(run_for_root, root_id, "h01_c3_flat", h01_version))
+        tasks.append(partial(run_for_root_caged, root_id, "h01_c3_flat", h01_version))
 
-        cf = CloudFiles(f"gs://bdp-ssa/v1dd/{MODEL_NAME}")
-        done_files = list(cf.list("features"))
-        done_roots = [
-            int(file.split("/")[-1].split(".")[0])
-            for file in done_files
-            if file.endswith(".npz")
-        ]
-        root_ids = np.setdiff1d(root_ids, done_roots)
-
-        tasks += [partial(run_for_root, root_id, "v1dd", 974) for root_id in root_ids]
-
-    if False:
-        version = 1154
-        datastack = "v1dd"
-        client = CAVEclient(datastack_name=datastack, version=version)
-
-        neuron_table = client.materialize.query_table("neurons_soma_model")
-        neuron_table = (
-            neuron_table.drop_duplicates("pt_root_id", keep=False)
-            .query("pt_root_id != 0")
-            .set_index("pt_root_id")
+    for root_id in j0251_keep_ids:
+        tasks.append(
+            partial(run_for_root_caged, root_id, "j0251", 0, lookup_nucleus=False)
         )
-        root_ids = neuron_table.index.unique()
-        root_ids = np.random.permutation(root_ids)
-        tasks += [
-            partial(
-                run_for_root,
-                root_id,
-                datastack,
-                version,
-            )
-            for root_id in root_ids
-        ]
-
-    if False:
-        pass
-        # NOTE: this was for getting cells with labels in my training set
-        # table = pd.read_csv(
-        #     "/Users/ben.pedigo/code/meshrep/meshrep/experiments/cautious-fig-thaw/labels.csv"
-        # )
-        # root_ids = table["pt_root_id"].unique()
-
-        # NOTE: this was for getting all cells in the column
-        # version = 1412
-        # client = CAVEclient(datastack_name=datastack, version=version)
-
-        # table = client.materialize.query_table(
-        #     "allen_v1_column_types_slanted_ref"
-        # ).set_index("target_id")
-
-        # root_ids = table.index.unique()
-
-    if False:
-        datastack = "minnie65_phase3_v1"
-        version = 1412
-        client = CAVEclient(datastack, version=version)
-        # column_table = client.materialize.query_table(
-        #     "allen_v1_column_types_slanted_ref"
-        # ).set_index("pt_root_id")
-        cell_table = client.materialize.query_view("aibs_cell_info")
-        neuron_table = (
-            cell_table.query("broad_type.isin(['excitatory', 'inhibitory'])")
-            .copy()
-            .set_index("id")
-        )
-        # neuron_table = neuron_table.query("pt_root_id != 0")
-        root_ids = neuron_table["pt_root_id"].unique()
-        root_ids = np.random.permutation(root_ids)
-        tasks += [
-            partial(run_for_root, root_id, datastack, version) for root_id in root_ids
-        ]
-        # root_ids = np.random.choice(root_ids, size=N_PER_BATCH, replace=False)
-
-        # currtime = time.time()
-        # mc = MorphClient(
-        #     "minnie65_phase3_v1",
-        #     hks_parameters="absolute-solo-yak",
-        #     verbose=VERBOSE,
-        #     n_jobs=N_JOBS,
-        # )
-
-        # has_hks = mc.has_hks(root_ids)
-
-        # root_ids = root_ids[~has_hks]
-        # print(len(root_ids), "morphs are missing HKS features.")
-
-    if False:
-        datastack = "minnie65_phase3_v1"
-        version = 1412
-        client = CAVEclient(datastack, version=version)
-        cell_table = client.materialize.query_table("allen_v1_column_types_slanted_ref")
-        cell_table = cell_table.drop_duplicates("pt_root_id", keep=False).set_index(
-            "pt_root_id"
-        )
-        root_ids = cell_table.index.unique()
-
-        root_ids = np.random.permutation(root_ids)
-        tasks += [
-            partial(run_for_root, root_id, datastack, version) for root_id in root_ids
-        ]
-
-        # NOTE: this was for getting all putative neurons
-        # table = (
-        #     client.materialize.query_view("""aibs_cell_info""")
-        #     .drop_duplicates("pt_root_id", keep=False)
-        #     .set_index("pt_root_id")
-        #     .query("broad_type == 'excitatory' or broad_type == 'inhibitory'")
-        #     .query("pt_root_id != 0")
-        # )
-        # root_ids = table.index.unique()
-
-        # NOTE: this is for looking at a handful of inhibitory cells from 611
-        # table = pd.read_csv(
-        #     "/Users/ben.pedigo/code/meshrep/611_inhibitory_cells_at_1474.csv"
-        # ).set_index("pt_root_id")
-        # root_ids = table.index.unique()
-        # tasks += [
-        #     partial(
-        #         run_for_root,
-        #         root_id,
-        #         datastack,
-        #         1474,
-        #     )
-        #     for root_id in root_ids
-        # ]
-
-        # NOTE: this was for getting column inputs at 1412
-        # table = (
-        #     pd.read_csv("meshrep/data/random/synapses_onto_column_count_1412.csv")
-        #     .set_index("pre_pt_root_id")
-        #     .query("synapse_onto_column_count_1412 >= 3")
-        # )
-        # root_ids = table.index.unique()
-
-        # tasks += [
-        #     # partial(run_for_root, root_id, datastack, 1412) for root_id in root_ids
-        # ]
-
-        # NOTE: this was for getting column inputs at 117
-        # table = (
-        #     pd.read_csv(
-        #         "/Users/ben.pedigo/code/meshrep/meshrep/data/random/old_pre_status.csv"
-        #     )
-        #     .set_index("old_pre_pt_root_id")
-        #     .query("(synapse_onto_column_count_1412 >= 3)")
-        # )
-        # root_ids = table.index.unique()
-
-        # Note: column outputs
-
-        # root_ids = np.random.permutation(root_ids)
-        # tasks += [
-        #     partial(run_for_root, root_id, datastack, version) for root_id in root_ids
-        # ]
-        # print(len(tasks))
-
-    if False:
-        datastack = "zheng_ca3"
-        version = 195
-        table = pd.read_csv(
-            "/Users/ben.pedigo/code/meshrep/cloud-mesh/data/zheng_ca3/updated_segids_20250423_manual.csv",
-            index_col=0,
-        )
-        root_ids = table["seg_m195_20250423"].unique()
-
-        # tasks += [
-        #     partial(
-        #         run_for_root,
-        #         root_id,
-        #         datastack,
-        #         version,
-        #         scale=1.0,
-        #         track_synapses=False,
-        #     )
-        #     for root_id in root_ids
-        # ]
-        tasks += [
-            partial(
-                run_for_root,
-                root_id,
-                datastack,
-                version,
-            )
-            for root_id in root_ids
-        ]
-    if False:
-        datastack = "zheng_ca3"
-        version = 357
-        root_ids = np.loadtxt(
-            "/Users/ben.pedigo/code/meshrep/cloud-mesh/data/zheng_ca3/ca3_object_selection_v357.txt",
-            dtype="str",
-        ).astype(np.int64)
-        root_ids = np.random.permutation(root_ids)
-
-        # tasks += [
-        #     partial(
-        #         run_for_root,
-        #         root_id,
-        #         datastack,
-        #         version,
-        #         scale=1.0,
-        #         track_synapses=False,
-        #     )
-        #     for root_id in root_ids
-        # ]
-        tasks += [
-            partial(
-                run_for_root,
-                root_id,
-                datastack,
-                version,
-            )
-            for root_id in root_ids
-        ]
 
 # %%
 
 
 if len(tasks) > 0:
-    for task_group in np.array_split(tasks, 20):
-        tq.insert(task_group)
+    # shuffle
+    from random import shuffle
+
+    shuffle(tasks)
+
+    batch_size = 10_000
+    n_batches = (len(tasks) + batch_size - 1) // batch_size
+    print(n_batches, "batches")
+
+    # for task_group in np.array_split(tasks, n_batches):
+    # tq.insert(task_group)

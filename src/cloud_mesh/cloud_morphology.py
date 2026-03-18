@@ -242,7 +242,14 @@ class CloudMorphology:
                 backoff_max=BACKOFF_MAX,
                 status_forcelist=(500, 501, 502, 503, 504),
             )
-            self._client = CAVEclient(self.datastack)
+            try:
+                self._client = CAVEclient(self.datastack)
+            except Exception:
+                logging.info(
+                    f"Error creating CAVEclient for datastack {self.datastack}, caveclient will be None"
+                )
+                self._client = None
+
             return self._client
 
     @property
@@ -252,7 +259,6 @@ class CloudMorphology:
             root_id = self.root_id
             datastack = self.datastack
             scale = self.scale
-            client = self.client
             version = self.version
 
             logging.info(f"Loading mesh for {root_id}")
@@ -269,8 +275,9 @@ class CloudMorphology:
                     "precomputed://https://syconn.esc.mpcdf.mpg.de/notebook/j0251/72_seg_20210127_agglo2_syn_20220811_celltypes_20230822/sv"
                 )
                 raw_mesh = mesh_source.get(root_id)[root_id]
+                raw_mesh = (raw_mesh.vertices, raw_mesh.faces)
             else:
-                cv = client.info.segmentation_cloudvolume(progress=False)
+                cv = self.client.info.segmentation_cloudvolume(progress=False)
                 raw_mesh = cv.mesh.get(root_id, **self.parameters["cv-mesh-get"])[
                     root_id
                 ]
