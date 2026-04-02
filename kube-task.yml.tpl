@@ -4,7 +4,9 @@
 #
 # Variables substituted at deploy time (all come from config.toml via make_cluster.sh):
 #   DOCKER_IMAGE, NUM_REPLICAS, QUEUE_URL, OUTPUT_BUCKET,
-#   LEASE_SECONDS, MAX_RUNS, N_JOBS, RECOMPUTE, LOGGING_LEVEL
+#   LEASE_SECONDS, MAX_RUNS, N_JOBS, RECOMPUTE, LOGGING_LEVEL,
+#   CPU_REQUEST, MEMORY_REQUEST, EPHEMERAL_STORAGE_REQUEST,
+#   MEMORY_LIMIT, EPHEMERAL_STORAGE_LIMIT
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -60,12 +62,12 @@ spec:
               value: "1"
           resources:
             requests:
-              memory: "4Gi"
-              cpu: "900m"
-              ephemeral-storage: "4Gi"
+              memory: "${MEMORY_REQUEST}"
+              cpu: "${CPU_REQUEST}"
+              ephemeral-storage: "${EPHEMERAL_STORAGE_REQUEST}"
             limits:
-              memory: "32Gi"
-              ephemeral-storage: "16Gi"
+              memory: "${MEMORY_LIMIT}"
+              ephemeral-storage: "${EPHEMERAL_STORAGE_LIMIT}"
           volumeMounts:
             - name: secrets-volume
               mountPath: /root/.cloudvolume/secrets

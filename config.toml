@@ -1,6 +1,6 @@
 # Cloud-mesh configuration
 # All cluster and job settings live here.
-# Datastack and materialization version are per-task (set in enqueue.py).
+# Datastack is per-task (set in enqueue.py).
 
 # ── GKE cluster ──────────────────────────────────────────────────────────────
 [cluster]
@@ -24,3 +24,11 @@ num_replicas = 4                                   # number of concurrent pods
 output_bucket = "gs://my-bucket/cloud-mesh-output" # where features are written
 queue_url = "gs://my-bucket/queues/cloud-mesh"     # task-queue URL (GCS or SQS)
 recompute = false                                  # reprocess even if output already exists
+
+# ── Pod resources ────────────────────────────────────────────────────────────
+[resources]
+cpu_request = "900m"
+ephemeral_storage_limit = "16Gi"
+ephemeral_storage_request = "4Gi"
+memory_limit = "32Gi"
+memory_request = "4Gi"

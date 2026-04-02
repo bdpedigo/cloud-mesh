@@ -26,4 +26,4 @@ t_min = 50000.0
 truncate_extra = true
 
 [save_condensed_features]
-feature_dtype = "float16"
+feature_dtype = "float32"

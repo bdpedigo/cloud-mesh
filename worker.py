@@ -74,7 +74,7 @@ def _output_path(output_bucket: str, datastack: str, root_id: int) -> str:
 
 
 @queueable
-def run_for_root(root_id: int, datastack: str, materialization_version: int) -> None:
+def run_for_root(root_id: int, datastack: str) -> None:
     """Extract condensed HKS features for one neuron and write to GCS."""
     out_path = _output_path(OUTPUT_BUCKET, datastack, root_id)
     cf = CloudFiles(f"{OUTPUT_BUCKET.rstrip('/')}/{datastack}/features")
@@ -85,16 +85,12 @@ def run_for_root(root_id: int, datastack: str, materialization_version: int) -> 
 
     try:
         set_session_defaults(max_retries=5, backoff_factor=4, backoff_max=240)
-        client = CAVEclient(datastack, version=materialization_version)
-
-        if not client.chunkedgraph.is_latest_roots([root_id])[0]:
-            log.info("root %s is not latest, skipping", root_id)
-            return
+        client = CAVEclient(datastack)
 
         log.info("loading mesh for %s", root_id)
         cv = client.info.segmentation_cloudvolume(progress=False)
-        raw = cv.mesh.get(root_id, **_hks.get("cv_mesh_get", {}))[root_id]
-        mesh = (raw.vertices, raw.faces)
+        mesh = cv.mesh.get(root_id, **_hks.get("cv_mesh_get", {}))[root_id]
+        mesh = (mesh.vertices, mesh.faces)
         log.info(
             "mesh loaded: %d vertices, %d faces", mesh[0].shape[0], mesh[1].shape[0]
         )
@@ -117,10 +113,9 @@ def run_for_root(root_id: int, datastack: str, materialization_version: int) -> 
     except Exception:
         exc = traceback.format_exc()
         log.error(
-            "failed on root_id=%s datastack=%s version=%s\n%s",
+            "failed on root_id=%s datastack=%s\n%s",
             root_id,
             datastack,
-            materialization_version,
             exc,
         )
         raise

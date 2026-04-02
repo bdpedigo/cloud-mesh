@@ -7,15 +7,15 @@ Usage
 -----
 # From a CSV with a column of root IDs:
     python enqueue.py --csv path/to/roots.csv --col pt_root_id \\
-        --datastack minnie65_phase3_v1 --version 1412
+        --datastack minnie65_phase3_v1
 
 # From a plain text file (one root ID per line):
     python enqueue.py --txt path/to/roots.txt \\
-        --datastack minnie65_phase3_v1 --version 1412
+        --datastack minnie65_phase3_v1
 
 # Quick inline list (space-separated):
     python enqueue.py --ids 864691135494786192 864691135851320007 \\
-        --datastack minnie65_phase3_v1 --version 1412
+        --datastack minnie65_phase3_v1
 """
 
 import argparse
@@ -51,9 +51,6 @@ def parse_args() -> argparse.Namespace:
         "--datastack",
         required=True,
         help="CAVE datastack name, e.g. minnie65_phase3_v1",
-    )
-    p.add_argument(
-        "--version", required=True, type=int, help="Materialization version integer"
     )
 
     src = p.add_mutually_exclusive_group(required=True)
@@ -98,15 +95,14 @@ def main() -> None:
         root_ids = args.ids
 
     log.info(
-        "enqueueing %d tasks → datastack=%s version=%d queue=%s",
+        "enqueueing %d tasks → datastack=%s queue=%s",
         len(root_ids),
         args.datastack,
-        args.version,
         args.queue_url,
     )
 
     tasks = [
-        partial(run_for_root, root_id, args.datastack, args.version)
+        partial(run_for_root, root_id, args.datastack)
         for root_id in root_ids
     ]
 

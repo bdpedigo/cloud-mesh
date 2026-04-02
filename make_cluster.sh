@@ -1,24 +1,37 @@
 #!/usr/bin/env bash
-# make_cluster.sh — Create a GKE cluster and deploy the cloud-mesh workers.
+# make_cluster.sh — Create a cluster and deploy the cloud-mesh workers.
 #
-# Prerequisites:
-#   - gcloud CLI authenticated: gcloud auth login && gcloud auth application-default login
-#   - kubectl available: gcloud components install kubectl
-#   - envsubst available: brew install gettext (macOS) or apt install gettext-base (Linux)
+# Modes:
+#   bash make_cluster.sh           — create a GKE cluster (production)
+#   bash make_cluster.sh --local   — create a local kind cluster (for testing)
+#
+# Prerequisites (both modes):
+#   - kubectl available
+#   - envsubst: brew install gettext (macOS) or apt install gettext-base (Linux)
 #   - CloudVolume secrets in ~/.cloudvolume/secrets/
+#   - Docker image already built
 #
-# Usage:
-#   bash make_cluster.sh
+# Additional prerequisites for GKE mode:
+#   - gcloud CLI authenticated: gcloud auth login && gcloud auth application-default login
+#   - kubectl via gcloud: gcloud components install kubectl
+#
+# Additional prerequisites for --local mode:
+#   - kind: brew install kind  (https://kind.sigs.k8s.io)
 #
 # All configurable values live in config.toml.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+LOCAL=false
+if [[ "${1:-}" == "--local" ]]; then
+    LOCAL=true
+fi
+
 # ── Read config.toml into shell variables ─────────────────────────────────────
 # Uses Python's stdlib tomllib (Python 3.11+) — no extra dependencies needed.
 eval "$(python3 - <<'EOF'
-import tomllib, os, sys
+import tomllib
 with open("config.toml", "rb") as f:
     cfg = tomllib.load(f)
 c, j = cfg["cluster"], cfg["job"]
@@ -41,51 +54,73 @@ pairs = {
     "RECOMPUTE":     str(j["recompute"]).lower(),
     "LOGGING_LEVEL": j["logging_level"],
 }
+r = cfg["resources"]
+pairs.update({
+    "CPU_REQUEST":               r["cpu_request"],
+    "MEMORY_REQUEST":            r["memory_request"],
+    "EPHEMERAL_STORAGE_REQUEST": r["ephemeral_storage_request"],
+    "MEMORY_LIMIT":              r["memory_limit"],
+    "EPHEMERAL_STORAGE_LIMIT":   r["ephemeral_storage_limit"],
+})
 for k, v in pairs.items():
     print(f'export {k}="{v}"')
 EOF
 )"
 
-echo "Project:      $PROJECT"
-echo "Cluster:      $CLUSTER_NAME ($MACHINE_TYPE × $NUM_NODES nodes)"
-echo "Zone:         $ZONE"
 echo "Docker image: $DOCKER_IMAGE  replicas: $NUM_REPLICAS"
 echo "Queue:        $QUEUE_URL"
 echo "Output:       $OUTPUT_BUCKET"
 echo ""
 
-# ── Create the cluster ────────────────────────────────────────────────────────
-gcloud config set project "$PROJECT"
+if [[ "$LOCAL" == true ]]; then
+    # ── Local: kind cluster ───────────────────────────────────────────────────
+    if kind get clusters 2>/dev/null | grep -q "^cloud-mesh$"; then
+        echo "kind cluster 'cloud-mesh' already exists, reusing."
+    else
+        echo "Creating kind cluster 'cloud-mesh'..."
+        kind create cluster --name cloud-mesh
+    fi
 
-gcloud container --project "$PROJECT" clusters create "$CLUSTER_NAME" \
-    --zone "$ZONE" \
-    --no-enable-basic-auth \
-    --release-channel "stable" \
-    --machine-type "$MACHINE_TYPE" \
-    --image-type "COS_CONTAINERD" \
-    --disk-type "pd-standard" \
-    --disk-size "$DISK_SIZE" \
-    --metadata disable-legacy-endpoints=true \
-    --scopes "https://www.googleapis.com/auth/devstorage.read_only,https://www.googleapis.com/auth/logging.write,https://www.googleapis.com/auth/monitoring" \
-    --preemptible \
-    --num-nodes "$NUM_NODES" \
-    --logging=SYSTEM,WORKLOAD \
-    --monitoring=SYSTEM \
-    --enable-ip-alias \
-    --network "$NETWORK" \
-    --subnetwork "$SUBNETWORK" \
-    --addons HorizontalPodAutoscaling,HttpLoadBalancing,GcePersistentDiskCsiDriver \
-    --enable-autoupgrade \
-    --enable-autorepair \
-    --max-unavailable-upgrade 0 \
-    --max-pods-per-node "256" \
-    --node-locations "$ZONE" \
-    --enable-shielded-nodes \
-    --shielded-secure-boot \
-    --shielded-integrity-monitoring
+    kubectl config use-context kind-cloud-mesh
 
-# Fetch credentials so kubectl works
-gcloud container clusters get-credentials --zone "$ZONE" "$CLUSTER_NAME"
+    echo "Loading image '$DOCKER_IMAGE' into kind cluster..."
+    kind load docker-image "$DOCKER_IMAGE" --name cloud-mesh
+else
+    # ── GKE cluster ───────────────────────────────────────────────────────────
+    echo "Project: $PROJECT  Cluster: $CLUSTER_NAME ($MACHINE_TYPE × $NUM_NODES)  Zone: $ZONE"
+    echo ""
+
+    gcloud config set project "$PROJECT"
+
+    gcloud container --project "$PROJECT" clusters create "$CLUSTER_NAME" \
+        --zone "$ZONE" \
+        --no-enable-basic-auth \
+        --release-channel "stable" \
+        --machine-type "$MACHINE_TYPE" \
+        --image-type "COS_CONTAINERD" \
+        --disk-type "pd-standard" \
+        --disk-size "$DISK_SIZE" \
+        --metadata disable-legacy-endpoints=true \
+        --scopes "https://www.googleapis.com/auth/devstorage.read_only,https://www.googleapis.com/auth/logging.write,https://www.googleapis.com/auth/monitoring" \
+        --preemptible \
+        --num-nodes "$NUM_NODES" \
+        --logging=SYSTEM,WORKLOAD \
+        --monitoring=SYSTEM \
+        --enable-ip-alias \
+        --network "$NETWORK" \
+        --subnetwork "$SUBNETWORK" \
+        --addons HorizontalPodAutoscaling,HttpLoadBalancing,GcePersistentDiskCsiDriver \
+        --enable-autoupgrade \
+        --enable-autorepair \
+        --max-unavailable-upgrade 0 \
+        --max-pods-per-node "256" \
+        --node-locations "$ZONE" \
+        --enable-shielded-nodes \
+        --shielded-secure-boot \
+        --shielded-integrity-monitoring
+
+    gcloud container clusters get-credentials --zone "$ZONE" "$CLUSTER_NAME"
+fi
 
 # ── Push CloudVolume secrets into the cluster ─────────────────────────────────
 # Picks up every file in ~/.cloudvolume/secrets/ automatically.
@@ -95,15 +130,31 @@ SECRET_ARGS=()
 for f in "$SECRETS_DIR"/*; do
     [[ -f "$f" ]] && SECRET_ARGS+=("--from-file=$f")
 done
+
+if kubectl get secret secrets &>/dev/null; then
+    echo "Secret 'secrets' already exists, replacing..."
+    kubectl delete secret secrets
+fi
 kubectl create secret generic secrets "${SECRET_ARGS[@]}"
 
 # ── Deploy ────────────────────────────────────────────────────────────────────
-envsubst < "$SCRIPT_DIR/kube-task.yml.tpl" | kubectl apply -f -
+if [[ "$LOCAL" == true ]]; then
+    # Use the locally-loaded image; don't try to pull from a registry.
+    envsubst < "$SCRIPT_DIR/kube-task.yml.tpl" \
+        | sed 's/imagePullPolicy: Always/imagePullPolicy: Never/' \
+        | kubectl apply -f -
+else
+    envsubst < "$SCRIPT_DIR/kube-task.yml.tpl" | kubectl apply -f -
+fi
 
 echo ""
 echo "Cluster ready. Useful commands:"
 echo "  kubectl get pods"
 echo "  kubectl logs -f <pod-name>"
 echo "  kubectl describe nodes"
-echo "  kubectl delete deployment cloud-mesh   # tear down workers"
-echo "  gcloud container clusters delete $CLUSTER_NAME --zone $ZONE  # delete cluster"
+echo "  kubectl delete deployment cloud-mesh          # tear down workers"
+if [[ "$LOCAL" == true ]]; then
+    echo "  kind delete cluster --name cloud-mesh         # delete local cluster"
+else
+    echo "  gcloud container clusters delete $CLUSTER_NAME --zone $ZONE  # delete cluster"
+fi
