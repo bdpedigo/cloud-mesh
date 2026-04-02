@@ -1,20 +1,12 @@
 [project]
 dependencies = [
-    "cave-mapper",
-    "caveclient[cv]>=7.0.0,<8.0.0",
+    "caveclient[cv]>=8.0.1",
     "cloud-files>=4.27.0",
     "cloud-volume>=12.12.0",
-    "cloudigo",
-    "fast-simplification>=0.1.12",
-    "joblib>=1.4.2",
-    "meshmash",
-    "morphsync",
-    "nglui>=3.7.2",
-    "pyvista[all]>=0.44.2",
-    "scikit-learn==1.6.1",
+    "meshmash>=0.1.0",
+    "numpy>=1.26",
+    "pandas>=2.0",
     "task-queue>=2.14.0",
-    "tensorstore>=0.1.76",
-    "toml>=0.10.2",
 ]
 name = "cloud-mesh"
 readme = "README.md"
@@ -24,9 +16,3 @@ version = "0.1.0"
 [build-system]
 build-backend = "hatchling.build"
 requires = ["hatchling"]
-
-[tool.uv.sources]
-cave-mapper = { path = "../cave-mapper", editable = true }
-cloudigo = { path = "../cloudigo", editable = true }
-meshmash = { path = "../meshmash", editable = true }
-morphsync = { path = "../morphsync", editable = true }
