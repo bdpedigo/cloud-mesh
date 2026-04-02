@@ -13,8 +13,8 @@ gcloud config set project exalted-beanbag-334502
 # num-nodes: The number of nodes to be created in each of the cluster's zones.
 # --machine-type "c2d-standard-32" \
 
-CORE_COUNT=32
-NUM_NODES=8
+CORE_COUNT=16
+NUM_NODES=1
 MACHINE_TYPE="c2d-highmem-${CORE_COUNT}"
 CLUSTER_NAME="cloud-mesh-${CORE_COUNT}x${NUM_NODES}"
 
@@ -60,5 +60,7 @@ kubectl create secret generic secrets \
     --from-file=$HOME/.cloudvolume/secrets/cave_datastack_to_server_map.json \
     --from-file=$HOME/.cloudvolume/secrets/globalv1.em.brain.allentech.org-cave-secret.json \
     --from-file=$HOME/.cloudvolume/secrets/global.em.brain.allentech.org-cave-secret.json \
+    --from-file=$HOME/.cloudvolume/secrets/global.brain-wire-test.org-cave-secret.json \
+    --from-file=$HOME/.cloudvolume/secrets/local.brain-wire-test.org-cave-secret.json
 
 kubectl apply -f kube-task.yml

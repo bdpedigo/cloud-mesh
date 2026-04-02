@@ -1,5 +1,8 @@
 # Extracting features and labels
 
+May have to run before build: 
+`docker buildx use desktop-linux` (as opposed to `multiplatform`)
+
 To build (from folder above):
 `docker buildx build --platform linux/amd64 -t cloud-mesh . -f ./cloud-mesh/Dockerfile`
 

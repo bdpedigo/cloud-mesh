@@ -185,7 +185,7 @@ class CloudMorphology:
     def __attrs_post_init__(self):
         if self.datastack == "zheng_ca3":
             path = Path(
-                f"gs://bdp-ssa//{self.datastack}/v{self.version}/{self.parameter_name}"
+                f"gs://bdp-ssa//{self.datastack}/{self.parameter_name}"
             )
         else:
             path = Path(f"gs://bdp-ssa//{self.datastack}/{self.parameter_name}")
@@ -242,13 +242,10 @@ class CloudMorphology:
                 backoff_max=BACKOFF_MAX,
                 status_forcelist=(500, 501, 502, 503, 504),
             )
-            try:
-                self._client = CAVEclient(self.datastack)
-            except Exception:
-                logging.info(
-                    f"Error creating CAVEclient for datastack {self.datastack}, caveclient will be None"
-                )
+            if self.datastack == "j0251":
                 self._client = None
+            else:
+                self._client = CAVEclient(self.datastack)
 
             return self._client
 
@@ -311,8 +308,8 @@ class CloudMorphology:
                     return_distances=True,
                 )
 
-                save_array(f"wrapped_mesh_mappings/{root_id}.npz", mapping)
-                save_array(f"wrapped_mesh_distances/{root_id}.npz", distances)
+                save_array(f"{self._path}/wrapped_mesh_mappings/{root_id}.npz", mapping)
+                save_array(f"{self._path}/wrapped_mesh_distances/{root_id}.npz", distances)
 
                 mesh_bytes = _write_mesh_to_bytes(wrapped_mesh)
                 self._cf.put(f"wrapped_meshes/{root_id}.ply", mesh_bytes)
@@ -327,8 +324,8 @@ class CloudMorphology:
                     wrapped_mesh.points,
                     wrapped_mesh.cells_dict["triangle"],
                 )
-                mapping = read_array(f"wrapped_mesh_mappings/{root_id}.npz")
-                distances = read_array(f"wrapped_mesh_distances/{root_id}.npz")
+                mapping = read_array(f"{self._path}/wrapped_mesh_mappings/{root_id}.npz")
+                distances = read_array(f"{self._path}/wrapped_mesh_distances/{root_id}.npz")
 
             self._cage_mesh = wrapped_mesh
             self._cage_mapping = mapping
