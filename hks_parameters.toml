@@ -1,0 +1,29 @@
+# Parameters for meshmash.condensed_hks_pipeline and related mesh I/O.
+# These are intentionally separate from config.toml so the same pipeline
+# parameters can be reused across different deployment contexts (local runs,
+# different clusters, downstream inference scripts, etc.).
+
+[cv_mesh_get]
+deduplicate_chunk_boundaries = false
+remove_duplicate_vertices = true
+
+[condensed_hks_pipeline]
+decomposition_dtype = "float32"
+distance_threshold = 3.0
+drop_first = true
+max_eigenvalue = 1e-5
+max_overlap_neighbors = 60000
+max_vertex_threshold = 20000
+min_vertex_threshold = 200
+mollify_factor = 1e-5
+n_components = 32
+overlap_distance = 20000
+robust = true
+simplify_agg = 7
+simplify_target_reduction = 0.7
+t_max = 20000000.0
+t_min = 50000.0
+truncate_extra = true
+
+[save_condensed_features]
+feature_dtype = "float32"
