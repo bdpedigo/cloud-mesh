@@ -27,8 +27,7 @@ local machine
 | `kubectl` | `gcloud components install kubectl` | [kubernetes.io/docs/tasks/tools](https://kubernetes.io/docs/tasks/tools/) |
 | `envsubst` | macOS: `brew install gettext`; Linux: `apt install gettext-base` | — |
 | Docker | for building and pushing the worker image | [docs.docker.com/get-docker](https://docs.docker.com/get-docker/) |
-| Python ≥ 3.12 | for running `enqueue.py` locally | [python.org](https://www.python.org/downloads/) |
-| `uv` | fast Python package manager (used in the container and recommended locally) | [docs.astral.sh/uv](https://docs.astral.sh/uv/getting-started/installation/) |
+| `uv` | fast Python package manager — manages Python and dependencies locally and in the container | [docs.astral.sh/uv](https://docs.astral.sh/uv/getting-started/installation/) |
 | CloudVolume secrets | JSON credential files in `~/.cloudvolume/secrets/` — at minimum `cave-secret.json` and `google-secret.json` | [github.com/seung-lab/cloud-volume](https://github.com/seung-lab/cloud-volume#credentials) |
 
 ---
@@ -40,17 +39,19 @@ local machine
 Edit `config.toml` to set your GCP project, machine type, Docker image name, task queue URL, and output bucket.  
 Edit `hks_parameters.toml` if you want to adjust pipeline hyperparameters.
 
+Then verify all prerequisites are in order:
+
+```bash
+bash check.sh
+```
+
 ### 2 — Build and push the Docker image
 
 ```bash
-# Build for linux/amd64 (required for GKE)
-docker buildx build --platform linux/amd64 -t your-user/cloud-mesh:v1 .
-
-# Push to Docker Hub (or your registry of choice)
-docker push your-user/cloud-mesh:v1
+bash build.sh
 ```
 
-Update `docker_image` in `config.toml` to match.
+This reads `docker_image` from `config.toml` and builds for `linux/amd64` (required for GKE), then pushes to your registry.
 
 ### 3 — Install local dependencies (for enqueue.py)
 
@@ -65,11 +66,11 @@ Populate the queue from a CSV before or while the cluster is running:
 ```bash
 # From a CSV with a column of root IDs
 uv run enqueue.py --csv path/to/roots.csv --col pt_root_id \
-    --datastack minnie65_phase3_v1
+    --datastack minnie65_public
 
 # Or pass root IDs directly
 uv run enqueue.py --ids 864691135494786192 864691135851320007 \
-    --datastack minnie65_phase3_v1
+    --datastack minnie65_public
 ```
 
 ### 5 — Create the cluster and deploy
@@ -82,6 +83,11 @@ This will:
 1. Create the GKE cluster using settings from `config.toml`
 2. Push CloudVolume secrets into the cluster
 3. Deploy the worker pods via `envsubst < kube-task.yml.tpl | kubectl apply -f -`
+
+> **Tip:** Steps 2 and 5 can be combined into a single command:
+> ```bash
+> bash deploy.sh --build
+> ```
 
 ---
 
@@ -108,7 +114,8 @@ uv run run_single.py --root-id 864691135436446706 --datastack minnie65_public
 
 **Tests:** Task queue integration, worker polling loop.
 
-**Prerequisites:** Stage 1 passing. Set `queue_url` in `config.toml` to a queue path (e.g. `gs://my-bucket/queues/cloud-mesh`).
+**Prerequisites:** Stage 1 passing. Set `queue_url` in `config.toml` to a queue path (e.g. `gs://my-bucket/queues/cloud-mesh`). If you do multiple rounds of debugging here, make sure that
+you always enqueue prior to trying to run the worker, since the worker will wait for a while if there are no tasks to claim.
 
 ```bash
 # Enqueue one task
@@ -129,8 +136,8 @@ CLOUD_MESH_MAX_RUNS=1 uv run worker.py
 **Prerequisites:** Stage 2 passing. Docker running locally.
 
 ```bash
-# Build for linux/amd64 (same architecture as GKE)
-docker buildx build --platform linux/amd64 -t your-user/cloud-mesh:v1 .
+# Build for linux/amd64 without pushing (will be run directly)
+bash build.sh --no-push
 
 # Enqueue a task (from your local Python env)
 uv run enqueue.py --ids 864691135436446706 --datastack minnie65_public
@@ -138,13 +145,10 @@ uv run enqueue.py --ids 864691135436446706 --datastack minnie65_public
 # Run the worker inside the container
 # config.toml is baked into the image, so queue/bucket settings are already present.
 # Only the secrets (never baked in) and a MAX_RUNS override are needed here.
-docker run --rm --platform linux/amd64 \
-    -v ~/.cloudvolume/secrets:/root/.cloudvolume/secrets \
-    -e CLOUD_MESH_MAX_RUNS=1 \
-    your-user/cloud-mesh:v1
+bash test_run_docker.sh
 ```
 
-**Verify:** Container exits after processing one task; output `.npz` appears in GCS.
+**Verify:** Container exits after processing one task; output `.npz` appears in GCS (or shows that it was already computed).
 
 ---
 
@@ -168,8 +172,7 @@ kubectl get pods
 kubectl logs -f <pod-name>
 
 # Tear down when done
-kubectl delete deployment cloud-mesh
-kind delete cluster --name cloud-mesh
+bash teardown.sh --local
 ```
 
 **Verify:** Pods show `Running` status; logs show tasks being processed.
@@ -182,10 +185,10 @@ kind delete cluster --name cloud-mesh
 
 ### Stage 5 — GKE (production)
 
-When all four local stages pass, you're ready for the real cluster. Push your image to a registry, update `docker_image` in `config.toml`, and follow the [Quick start](#quick-start).
+When all four local stages pass, you're ready for the real cluster. Follow the [Quick start](#quick-start).
 
 ```bash
-docker push your-user/cloud-mesh:v1
+bash build.sh
 bash make_cluster.sh
 ```
 
@@ -226,11 +229,8 @@ kubectl logs -f <pod-name>
 # Check node resource usage
 kubectl describe nodes
 
-# Tear down the deployment (keeps the cluster)
-kubectl delete deployment cloud-mesh
-
-# Delete the cluster entirely
-gcloud container clusters delete <cluster-name> --zone <zone>
+# Tear down deployment and (optionally) delete the cluster
+bash teardown.sh
 ```
 
 ---
@@ -242,8 +242,6 @@ gcloud container clusters delete <cluster-name> --zone <zone>
 docker buildx use desktop-linux
 
 # Build and run locally for testing (mounts your secrets):
-# config.toml is baked into the image, so queue/bucket settings are already present.
-docker run --rm --platform linux/amd64 \
-    -v ~/.cloudvolume/secrets:/root/.cloudvolume/secrets \
-    your-user/cloud-mesh:v1
+bash build.sh --no-push
+bash test_run_docker.sh
 ```

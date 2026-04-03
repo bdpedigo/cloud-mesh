@@ -7,22 +7,22 @@
 cluster_name = "cloud-mesh"
 disk_size_gb = 200
 machine_type = "c2d-highmem-16"
-network = "default"             # VPC network name or full resource path
+network = "projects/exalted-beanbag-334502/global/networks/patchseq"             # VPC network name or full resource path
 num_nodes = 1
-project = "my-gcp-project"      # GCP project ID
-subnetwork = "default"          # Subnetwork name or full resource path
+project = "exalted-beanbag-334502"      # GCP project ID
+subnetwork = "projects/exalted-beanbag-334502/regions/us-west1/subnetworks/patchseq"          # Subnetwork name or full resource path
 zone = "us-west1-c"
 
 # ── Kubernetes job ────────────────────────────────────────────────────────────
 [job]
-docker_image = "your-dockerhub-user/cloud-mesh:v1" # image to run in each pod
+docker_image = "bdpedigo/cloud-mesh:vtest" # image to run in each pod
 lease_seconds = 600                                # how long a task is reserved before retry
 logging_level = "INFO"
 max_runs = 10                                      # tasks processed per pod before restarting
 n_jobs = 1                                         # parallelism inside a single task (1 = no parallel)
-num_replicas = 4                                   # number of concurrent pods
-output_bucket = "gs://my-bucket/cloud-mesh-output" # where features are written
-queue_url = "gs://my-bucket/queues/cloud-mesh"     # task-queue URL (GCS or SQS)
+num_replicas = 2                                   # number of concurrent pods
+output_bucket = "gs://bdp-ssa/test" # where features are written
+queue_url = "https://sqs.us-west-2.amazonaws.com/629034007606/ben-skedit"     # task-queue URL (GCS or SQS)
 recompute = false                                  # reprocess even if output already exists
 
 # ── Pod resources ────────────────────────────────────────────────────────────

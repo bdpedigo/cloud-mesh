@@ -20,6 +20,7 @@ from caveclient import CAVEclient, set_session_defaults
 from cloudfiles import CloudFiles
 from meshmash import condensed_hks_pipeline, save_condensed_features
 from taskqueue import TaskQueue, queueable
+from taskqueue.queueablefns import REGISTRY as _tq_registry
 
 # ── Load config ───────────────────────────────────────────────────────────────
 
@@ -140,6 +141,10 @@ def run_for_root(root_id: int, datastack: str) -> None:
         )
         raise
 
+
+# Ensure the function is findable under ('worker', 'run_for_root') regardless of
+# whether this module is run as __main__ or imported as worker.
+_tq_registry[("worker", "run_for_root")] = run_for_root
 
 # ── Poll ──────────────────────────────────────────────────────────────────────
 

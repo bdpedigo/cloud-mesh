@@ -18,21 +18,22 @@
 # Additional prerequisites for --local mode:
 #   - kind: brew install kind  (https://kind.sigs.k8s.io)
 #
-# All configurable values live in config.toml.
+# All configurable values live in config.toml (or CONFIG_PATH).
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export CONFIG_PATH="${CONFIG_PATH:-config.toml}"
 
 LOCAL=false
 if [[ "${1:-}" == "--local" ]]; then
     LOCAL=true
 fi
 
-# ── Read config.toml into shell variables ─────────────────────────────────────
+# ── Read config into shell variables ──────────────────────────────────────────
 # Uses Python's stdlib tomllib (Python 3.11+) — no extra dependencies needed.
 eval "$(python3 - <<'EOF'
-import tomllib
-with open("config.toml", "rb") as f:
+import tomllib, os
+with open(os.environ["CONFIG_PATH"], "rb") as f:
     cfg = tomllib.load(f)
 c, j = cfg["cluster"], cfg["job"]
 pairs = {
