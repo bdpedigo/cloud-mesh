@@ -7,7 +7,7 @@ resolution-markers = [
 ]
 
 [options]
-exclude-newer = "2026-03-19T23:14:43.219384Z"
+exclude-newer = "2026-03-20T00:00:47.833174Z"
 exclude-newer-span = "P14D"
 
 [[package]]
@@ -256,7 +256,7 @@ wheels = [
 [[package]]
 name = "cloud-mesh"
 version = "0.1.0"
-source = { editable = "." }
+source = { virtual = "." }
 dependencies = [
     { name = "caveclient", extra = ["cv"] },
     { name = "cloud-files" },

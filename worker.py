@@ -76,44 +76,64 @@ def _output_path(output_bucket: str, datastack: str, root_id: int) -> str:
 @queueable
 def run_for_root(root_id: int, datastack: str) -> None:
     """Extract condensed HKS features for one neuron and write to GCS."""
+    log.info("root ID=%s, datastack=%s - starting", root_id, datastack)
     out_path = _output_path(OUTPUT_BUCKET, datastack, root_id)
     cf = CloudFiles(f"{OUTPUT_BUCKET.rstrip('/')}/{datastack}/features")
 
     if not RECOMPUTE and cf.exists(f"{root_id}.npz"):
-        log.info("already done: %s, skipping", root_id)
+        log.info(
+            "root ID=%s, datastack=%s - already done, skipping", root_id, datastack
+        )
         return
 
     try:
         set_session_defaults(max_retries=5, backoff_factor=4, backoff_max=240)
         client = CAVEclient(datastack)
 
-        log.info("loading mesh for %s", root_id)
+        log.info("root ID=%s, datastack=%s - loading mesh", root_id, datastack)
         cv = client.info.segmentation_cloudvolume(progress=False)
         mesh = cv.mesh.get(root_id, **_hks.get("cv_mesh_get", {}))[root_id]
         mesh = (mesh.vertices, mesh.faces)
         log.info(
-            "mesh loaded: %d vertices, %d faces", mesh[0].shape[0], mesh[1].shape[0]
+            "root ID=%s, datastack=%s - mesh loaded: %d vertices, %d faces",
+            root_id,
+            datastack,
+            mesh[0].shape[0],
+            mesh[1].shape[0],
         )
 
+        log.info("root ID=%s, datastack=%s - extracting features", root_id, datastack)
         result = condensed_hks_pipeline(
             mesh,
             verbose=False,
             n_jobs=N_JOBS,
             **_hks["condensed_hks_pipeline"],
         )
+        log.info("root ID=%s, datastack=%s - features extracted", root_id, datastack)
 
+        log.info(
+            "root ID=%s, datastack=%s - saving features → %s",
+            root_id,
+            datastack,
+            out_path,
+        )
         save_condensed_features(
             out_path,
             result.condensed_features,
             result.labels,
             **_hks.get("save_condensed_features", {}),
         )
-        log.info("saved features for %s → %s", root_id, out_path)
+        log.info(
+            "root ID=%s, datastack=%s - saved features → %s",
+            root_id,
+            datastack,
+            out_path,
+        )
 
     except Exception:
         exc = traceback.format_exc()
         log.error(
-            "failed on root_id=%s datastack=%s\n%s",
+            "root ID=%s, datastack=%s - failed\n%s",
             root_id,
             datastack,
             exc,

@@ -6,15 +6,15 @@ Run locally BEFORE spinning up the GKE cluster (or while it's running).
 Usage
 -----
 # From a CSV with a column of root IDs:
-    python enqueue.py --csv path/to/roots.csv --col pt_root_id \\
+    uv run enqueue.py --csv path/to/roots.csv --col pt_root_id \\
         --datastack minnie65_phase3_v1
 
 # From a plain text file (one root ID per line):
-    python enqueue.py --txt path/to/roots.txt \\
+    uv run enqueue.py --txt path/to/roots.txt \\
         --datastack minnie65_phase3_v1
 
 # Quick inline list (space-separated):
-    python enqueue.py --ids 864691135494786192 864691135851320007 \\
+    uv run enqueue.py --ids 864691135494786192 864691135851320007 \\
         --datastack minnie65_phase3_v1
 """
 
@@ -24,6 +24,8 @@ import sys
 from functools import partial
 from pathlib import Path
 
+import os
+
 import tomllib
 from taskqueue import TaskQueue
 
@@ -31,7 +33,7 @@ from worker import run_for_root
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
-_config_path = Path(__file__).parent / "config.toml"
+_config_path = Path(os.environ.get("CONFIG_PATH", Path(__file__).parent / "config.toml"))
 with open(_config_path, "rb") as _f:
     _job = tomllib.load(_f)["job"]
 

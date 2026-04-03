@@ -97,7 +97,7 @@ When setting up the system from scratch — or debugging a problem — it helps 
 Set `output_bucket` in `config.toml` to a writable GCS path.
 
 ```bash
-uv run run_single.py --root-id 864691135307555142 --datastack minnie65_public
+uv run run_single.py --root-id 864691135436446706 --datastack minnie65_public
 ```
 
 **Verify:** The script logs `saved features for ... → gs://...` and the `.npz` file appears in your output bucket.
@@ -108,11 +108,11 @@ uv run run_single.py --root-id 864691135307555142 --datastack minnie65_public
 
 **Tests:** Task queue integration, worker polling loop.
 
-**Prerequisites:** Stage 1 passing. Set `queue_url` in `config.toml` to a GCS-backed queue path (e.g. `gs://my-bucket/queues/cloud-mesh`).
+**Prerequisites:** Stage 1 passing. Set `queue_url` in `config.toml` to a queue path (e.g. `gs://my-bucket/queues/cloud-mesh`).
 
 ```bash
 # Enqueue one task
-uv run enqueue.py --ids 864691135307555142 --datastack minnie65_public
+uv run enqueue.py --ids 864691135436446706 --datastack minnie65_public
 
 # Pull and process it (exits after one task)
 CLOUD_MESH_MAX_RUNS=1 uv run worker.py
@@ -133,7 +133,7 @@ CLOUD_MESH_MAX_RUNS=1 uv run worker.py
 docker buildx build --platform linux/amd64 -t your-user/cloud-mesh:v1 .
 
 # Enqueue a task (from your local Python env)
-uv run enqueue.py --ids 864691135307555142 --datastack minnie65_public
+uv run enqueue.py --ids 864691135436446706 --datastack minnie65_public
 
 # Run the worker inside the container
 # config.toml is baked into the image, so queue/bucket settings are already present.
@@ -156,7 +156,7 @@ docker run --rm --platform linux/amd64 \
 
 ```bash
 # Enqueue some tasks first
-uv run enqueue.py --ids 864691135307555142 --datastack minnie65_public
+uv run enqueue.py --ids 864691135436446706 --datastack minnie65_public
 
 # Stand up a local cluster, load the image, and deploy
 bash make_cluster.sh --local

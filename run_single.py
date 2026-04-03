@@ -14,11 +14,11 @@ import argparse
 import logging
 import sys
 
-from worker import run_for_root
-
 logging.basicConfig(
     level="INFO", format="%(asctime)s %(levelname)s — %(message)s", stream=sys.stdout
 )
+
+from worker import run_for_root
 
 
 def parse_args() -> argparse.Namespace:
@@ -36,4 +36,7 @@ def parse_args() -> argparse.Namespace:
 
 if __name__ == "__main__":
     args = parse_args()
+    logging.info(
+        f"root ID={args.root_id}, datastack={args.datastack} - running HKS pipeline"
+    )
     run_for_root(args.root_id, args.datastack)
