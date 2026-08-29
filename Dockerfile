@@ -15,10 +15,11 @@ COPY pyproject.toml uv.lock README.md ./
 RUN uv sync --frozen --no-install-project
 
 # Copy application code and config
-COPY worker.py config.toml hks_parameters.toml ./
+COPY worker_pubsub.py run_hks.py PSTaskQueue.py monitor.py config.toml hks_parameters.toml ./
 
 # Install the project itself
 RUN uv sync --frozen
+
 
 ENV PATH="/app/.venv/bin:$PATH"
 ENV OPENBLAS_NUM_THREADS=1
@@ -26,4 +27,6 @@ ENV MKL_NUM_THREADS=1
 ENV NUMEXPR_NUM_THREADS=1
 ENV OMP_NUM_THREADS=1
 
-CMD ["uv", "run", "worker.py"]
+# Default: run the Pub/Sub worker. Swap in worker.py to use the original
+# task-queue path instead.
+CMD ["uv", "run", "worker_pubsub.py"]

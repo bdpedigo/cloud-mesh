@@ -5,74 +5,56 @@
 # Variables substituted at deploy time (all come from config.toml via make_cluster.sh):
 #   DOCKER_IMAGE, NUM_REPLICAS, QUEUE_URL, OUTPUT_BUCKET,
 #   LEASE_SECONDS, MAX_RUNS, N_JOBS, RECOMPUTE, LOGGING_LEVEL,
-#   CPU_REQUEST, MEMORY_REQUEST, EPHEMERAL_STORAGE_REQUEST,
-#   MEMORY_LIMIT, EPHEMERAL_STORAGE_LIMIT
+#   CPU_REQUEST, CPU_LIMIT, MEMORY_REQUEST, EPHEMERAL_STORAGE_REQUEST,
+#   MEMORY_LIMIT, EPHEMERAL_STORAGE_LIMIT, SLACK_SECRET_NAME
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  labels:
-    run: cloud-mesh
-  name: cloud-mesh
+  name: cloud-mesh-worker
+  namespace: workers
 spec:
   replicas: ${NUM_REPLICAS}
   selector:
     matchLabels:
-      run: cloud-mesh
-  strategy:
-    rollingUpdate:
-      maxSurge: 100%
-      maxUnavailable: 100%
-    type: RollingUpdate
+      app: cloud-mesh-worker
   template:
     metadata:
       labels:
-        run: cloud-mesh
+        app: cloud-mesh-worker
     spec:
+      serviceAccountName: ksa-worker
       containers:
-        - image: ${DOCKER_IMAGE}
-          name: cloud-mesh
-          imagePullPolicy: Always
-          command: ["/bin/sh"]
-          args: ["-c", "while true; do uv run worker.py; done"]
-          env:
-            - name: GOOGLE_APPLICATION_CREDENTIALS
-              value: "/root/.cloudvolume/secrets/google-secret.json"
-            - name: CLOUD_MESH_QUEUE_URL
-              value: "${QUEUE_URL}"
-            - name: CLOUD_MESH_OUTPUT_BUCKET
-              value: "${OUTPUT_BUCKET}"
-            - name: CLOUD_MESH_LEASE_SECONDS
-              value: "${LEASE_SECONDS}"
-            - name: CLOUD_MESH_MAX_RUNS
-              value: "${MAX_RUNS}"
-            - name: CLOUD_MESH_N_JOBS
-              value: "${N_JOBS}"
-            - name: CLOUD_MESH_RECOMPUTE
-              value: "${RECOMPUTE}"
-            - name: CLOUD_MESH_LOGGING_LEVEL
-              value: "${LOGGING_LEVEL}"
-            # Thread count guards — keep at 1 to avoid over-subscription
-            - name: OPENBLAS_NUM_THREADS
-              value: "1"
-            - name: MKL_NUM_THREADS
-              value: "1"
-            - name: NUMEXPR_NUM_THREADS
-              value: "1"
-            - name: OMP_NUM_THREADS
-              value: "1"
-          resources:
-            requests:
-              memory: "${MEMORY_REQUEST}"
-              cpu: "${CPU_REQUEST}"
-              ephemeral-storage: "${EPHEMERAL_STORAGE_REQUEST}"
-            limits:
-              memory: "${MEMORY_LIMIT}"
-              ephemeral-storage: "${EPHEMERAL_STORAGE_LIMIT}"
-          volumeMounts:
-            - name: secrets-volume
-              mountPath: /root/.cloudvolume/secrets
-      dnsPolicy: Default
-      volumes:
-        - name: secrets-volume
-          secret:
-            secretName: secrets
+      - name: worker
+        image: ${DOCKER_IMAGE}
+        imagePullPolicy: Always
+        command: ["uv", "run", "worker_pubsub.py"]
+        env:
+        - name: GCP_PROJECT
+          value: "${PROJECT}"
+        - name: PUBSUB_SUBSCRIPTION
+          value: "hks-todo-sub"
+        - name: CLOUD_MESH_OUTPUT_BUCKET
+          value: "${OUTPUT_BUCKET}"
+        - name: CONFIG_PATH
+          value: "/app/config.toml"
+        - name: CLOUD_MESH_RECOMPUTE
+          value: "${RECOMPUTE}"
+        - name: CAVE_AUTH_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: cave-secret
+              key: CAVE_AUTH_TOKEN
+        - name: SLACK_WEBHOOK_URL
+          valueFrom:
+            secretKeyRef:
+              name: slack-secret
+              key: SLACK_WEBHOOK_URL
+        resources:
+          requests:
+            cpu: "${CPU_REQUEST}"
+            memory: "${MEMORY_REQUEST}"
+            ephemeral-storage: "${EPHEMERAL_STORAGE_REQUEST}"
+          limits:
+            cpu: "${CPU_LIMIT}"
+            memory: "${MEMORY_LIMIT}"
+            ephemeral-storage: "${EPHEMERAL_STORAGE_LIMIT}"
