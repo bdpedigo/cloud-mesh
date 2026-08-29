@@ -16,6 +16,28 @@ local machine
               GKE pods (worker.py) ──► GCS output bucket
 ```
 
+### Pub/Sub path
+
+There is a second, optional execution path built on Google Cloud Pub/Sub.
+Instead of pods polling a GCS/SQS queue, `enqueue_pubsub.py` publishes tasks to
+a Pub/Sub topic and pods pull from a subscription, which gives at-least-once
+delivery, a dead-letter topic for repeated failures, and an ack deadline that
+is extended while a long task is still running.
+
+```
+local machine
+  enqueue_pubsub.py ──► Pub/Sub topic ──► subscription
+                                              │
+                                    GKE pods (worker_pubsub.py)
+                                              │
+                                    GCS output bucket
+                                              ▲
+                        monitor.py (CronJob) ─┘──► Slack
+```
+
+The original `enqueue.py` / `worker.py` path is untouched and still works; pick
+whichever suits your setup. See [Pub/Sub mode](#pubsub-mode) below.
+
 ---
 
 ## Prerequisites
@@ -194,15 +216,89 @@ bash make_cluster.sh
 
 ---
 
+## Pub/Sub mode
+
+### Enqueueing
+
+`enqueue_pubsub.py` takes `--mode` and `--ids`, where `--ids` is either a single
+root ID or a path to a text file with one root ID per line (`#` comments are
+ignored).
+
+```bash
+# One full-mesh task per root ID
+uv run enqueue_pubsub.py --mode whole-cell --ids roots.txt \
+    --datastack minnie65_phase3_v1
+
+# One targeted task per synaptic partner of each root ID
+uv run enqueue_pubsub.py --mode synapse --ids 864691135436446706 \
+    --datastack minnie65_phase3_v1 --query-radius-nm 1000
+```
+
+### Synapse-targeted HKS
+
+In `synapse` mode each task computes HKS over a ball around one synapse rather
+than over the partner's entire mesh. The mesh is pruned to that neighbourhood
+*before* simplification, so cost scales with the local neighbourhood instead of
+the whole cell — a large saving on big presynaptic neurons, where most of the
+mesh is irrelevant to the synapse being characterised.
+
+Partners are covered on both sides (cells presynaptic to the main cell, and
+cells postsynaptic to it). The main cell itself is skipped, since its own
+features come from a `whole-cell` run.
+
+Targeted outputs land at:
+```
+{output_bucket}/{datastack}/features/synapse/{partner_root_id}_syn_{synapse_id}.npz
+```
+
+Tunables live under `[chunked_hks_pipeline]` in `hks_parameters.toml`;
+`[mesh_filter]` sets vertex-count bounds for skipping meshes that are too small
+to characterise or too large to be worth attempting.
+
+To run one synapse locally without the queue:
+
+```bash
+uv run run_targeted.py --datastack minnie65_phase3_v1 \
+    --root-id 864691135436446706 --synapse-id 12345678 \
+    --query-point 200008 148538 2959 --query-units voxel
+```
+
+> **Units:** CAVE stores `ctr_pt_position` at the segmentation's MIP-0 voxel
+> size, which is what `client.info.viewer_resolution()` reports — that is the
+> conversion used by default. Coordinates copied from neuroglancer's cursor
+> readout are at image MIP-0 instead; where those two scales differ, pass
+> `--voxel-size` explicitly.
+
+### Cluster setup
+
+`make_cluster.sh` creates the topic, subscription, and dead-letter pair from
+the `[pubsub]` block in `config.toml`, wires up Workload Identity, and deploys
+both the worker Deployment and the monitor CronJob.
+
+```bash
+uv run purge_queue.py --dry-run   # how many messages are pending
+uv run purge_queue.py             # drain the subscription
+```
+
+---
+
 ## Configuration reference
 
 ### `config.toml`
 
 Controls cluster settings, Docker image name, task queue URL, and output bucket. See the file itself for all keys and their defaults.
 
+Pub/Sub mode adds a `[pubsub]` block (topic, subscription, dead-letter pair, ack
+deadline, task timeout), a `[monitor]` block (CronJob schedule and the datastack
+whose outputs to count), and an optional `[paths]` block pointing at a shared
+filesystem holding per-cell synapse tables and meshes.
+
 ### `hks_parameters.toml`
 
 Controls `meshmash.condensed_hks_pipeline` kwargs, CloudVolume mesh-get options, and output dtype. See the file itself for all keys and their defaults.
+
+Adds `[chunked_hks_pipeline]` (kwargs for `meshmash.chunked_hks_pipeline`, used
+by synapse-targeted tasks) and `[mesh_filter]` (vertex-count bounds).
 
 ---
 
@@ -214,6 +310,11 @@ Features are written to:
 ```
 
 Each `.npz` contains the condensed HKS feature matrix and per-vertex labels as produced by `meshmash.save_condensed_features`.
+
+Synapse-targeted runs write one file per synapse instead:
+```
+{output_bucket}/{datastack}/features/synapse/{partner_root_id}_syn_{synapse_id}.npz
+```
 
 ---
 
@@ -231,6 +332,50 @@ kubectl describe nodes
 
 # Tear down deployment and (optionally) delete the cluster
 bash teardown.sh
+```
+
+### Progress reporting
+
+`monitor.py` runs as a Kubernetes CronJob on the `[monitor].schedule` from
+`config.toml`. Each tick reports queue depth, running pod count, completed
+output count, and any new dead-letter messages to a Slack incoming webhook,
+resolved from `SLACK_WEBHOOK_URL` or GCP Secret Manager. With no webhook
+configured it logs and carries on, so Slack is optional.
+
+`check_status.py` answers "what is actually finished?" by listing the output
+bucket once and comparing against the expected outputs:
+
+```bash
+# Which root IDs have a full-mesh output
+uv run check_status.py --mode whole-cell --ids roots.txt \
+    --datastack minnie65_phase3_v1
+
+# Per-synapse partner coverage for one cell
+uv run check_status.py --mode synapse --ids 864691135436446706 \
+    --datastack minnie65_phase3_v1
+
+# Per-root rollup across many cells, written to CSV
+uv run check_status.py --mode summary --ids roots.txt \
+    --datastack minnie65_phase3_v1
+```
+
+Adding `--update-gsheet` to `summary` mode pushes the rollup to a Google Sheet
+that is created on first run and updated in place afterwards, which is handy
+for sharing progress on a long batch. That path needs the optional extra:
+
+```bash
+uv sync --extra gsheet
+```
+
+Sheets auth uses an OAuth Desktop-app client: set `GOOGLE_OAUTH_CLIENT_FILE` to
+the client-secret JSON (or drop it beside `gsheet_utils.py` as
+`client_secret.json` — both are git-ignored). The first run opens a browser for
+consent and caches the token in `gspread_token.json`; delete that file to
+re-authorize.
+
+```bash
+# Dump logs from every pod into a timestamped folder
+bash dump_pod_logs.sh
 ```
 
 ---

@@ -33,11 +33,11 @@ EOF
 )"
 
 # Delete the Kubernetes deployment (non-destructive to the cluster itself)
-if kubectl get deployment cloud-mesh &>/dev/null; then
-    echo "Deleting deployment 'cloud-mesh'..."
-    kubectl delete deployment cloud-mesh
+if kubectl get deployment cloud-mesh-worker -n workers &>/dev/null; then
+    echo "Deleting deployment 'cloud-mesh-worker'..."
+    kubectl delete deployment cloud-mesh-worker -n workers
 else
-    echo "No deployment 'cloud-mesh' found, skipping."
+    echo "No deployment 'cloud-mesh-worker' found, skipping."
 fi
 
 if [[ "$LOCAL" == true ]]; then

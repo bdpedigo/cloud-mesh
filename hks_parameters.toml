@@ -25,5 +25,30 @@ t_max = 20000000.0
 t_min = 50000.0
 truncate_extra = true
 
+# Parameters for meshmash.chunked_hks_pipeline, used when a pubsub task
+# carries query_point_nm + query_radius_nm (i.e. targeted-region HKS).
+# Defaults mirror meshmash.chunked_hks_pipeline's own defaults.
+[chunked_hks_pipeline]
+decomposition_dtype = "float32"
+distance_threshold = 3.0
+drop_first = true
+max_eigenvalue = 5e-6
+max_overlap_neighbors = 60000
+max_vertex_threshold = 20000
+min_vertex_threshold = 200
+mollify_factor = 1e-5
+n_components = 32
+overlap_distance =  20000 # 10000 #
+robust = true
+simplify_agg = 7
+simplify_target_reduction = 0.7
+t_max = 20000000.0
+t_min = 50000.0
+truncate_extra = true
+
 [save_condensed_features]
 feature_dtype = "float32"
+
+[mesh_filter]
+min_total_vertices = 300         # skip entire mesh if smaller than this (too small for reliable HKS)
+max_total_vertices = 50_000_000   # skip entire mesh if larger than this (too slow / likely an error)

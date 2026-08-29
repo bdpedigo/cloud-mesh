@@ -31,11 +31,38 @@ EOF
 
 echo "Config:        $CONFIG_PATH"
 echo "Building image: $DOCKER_IMAGE"
-docker buildx build --platform linux/amd64 -t "$DOCKER_IMAGE" "$SCRIPT_DIR"
+
+# Tag with git SHA so each build is uniquely identifiable.
+# Also updates config.toml so make_cluster.sh deploys the exact same image.
+GIT_SHA="$(git -C "$SCRIPT_DIR" rev-parse --short HEAD 2>/dev/null || echo "nogit")"
+DOCKER_IMAGE_SHA="${DOCKER_IMAGE%:*}:${GIT_SHA}"
+
+echo "Git SHA tag:    $DOCKER_IMAGE_SHA"
+docker buildx build --platform linux/amd64 \
+    -t "$DOCKER_IMAGE" \
+    -t "$DOCKER_IMAGE_SHA" \
+    "$SCRIPT_DIR"
 
 if [[ "$NO_PUSH" == true ]]; then
     echo "Skipping push (--no-push)."
 else
-    echo "Pushing image: $DOCKER_IMAGE"
+    echo "Pushing image: $DOCKER_IMAGE and $DOCKER_IMAGE_SHA"
     docker push "$DOCKER_IMAGE"
+    docker push "$DOCKER_IMAGE_SHA"
 fi
+
+# Write the SHA-tagged image back to config.toml so make_cluster.sh uses it.
+python3 - <<PYEOF
+import re, os
+path = os.environ["CONFIG_PATH"]
+with open(path) as f:
+    content = f.read()
+new = re.sub(
+    r'(docker_image\s*=\s*")[^"]+(")',
+    lambda m: m.group(1) + "$DOCKER_IMAGE_SHA" + m.group(2),
+    content
+)
+with open(path, "w") as f:
+    f.write(new)
+print(f"Updated {path}: docker_image = $DOCKER_IMAGE_SHA")
+PYEOF
