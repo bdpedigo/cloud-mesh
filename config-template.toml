@@ -1,6 +1,6 @@
 # Cloud-mesh configuration
 # All cluster and job settings live here.
-# Datastack is per-task (set in enqueue.py).
+# Datastack is per-task (passed to enqueue_pubsub.py / check_status.py via --datastack).
 
 # ── GKE cluster ──────────────────────────────────────────────────────────────
 [cluster]
@@ -12,6 +12,9 @@ num_nodes = 1
 project = "my-gcp-project"      # GCP project ID
 subnetwork = "default"          # Subnetwork name or full resource path
 zone = "us-west1-c"
+# Optional: pin cluster nodes to a specific service account. Omit or leave
+# empty to use the project's default compute service account.
+# node_service_account = "node-sa@my-gcp-project.iam.gserviceaccount.com"
 
 # ── Kubernetes job ────────────────────────────────────────────────────────────
 [job]
@@ -22,12 +25,38 @@ max_runs = 10                                      # tasks processed per pod bef
 n_jobs = 1                                         # parallelism inside a single task (1 = no parallel)
 num_replicas = 4                                   # number of concurrent pods
 output_bucket = "gs://my-bucket/cloud-mesh-output" # where features are written
-queue_url = "gs://my-bucket/queues/cloud-mesh"     # task-queue URL (GCS or SQS)
-recompute = false                                  # reprocess even if output already exists
+recompute = false                                 # reprocess even if output already exists
+slack_secret_name = "slack-webhook"               # GCP Secret Manager secret name for the Slack webhook
+
+# ── Pub/Sub settings ──────────────────────────────────────────────────────────
+[pubsub]
+topic = "projects/my-gcp-project/topics/hks-todo"
+subscription = "projects/my-gcp-project/subscriptions/hks-todo-sub"
+dead_letter_topic = "projects/my-gcp-project/topics/hks-dead"
+dead_letter_subscription = "projects/my-gcp-project/subscriptions/hks-dead-sub"
+max_delivery_attempts = 5        # move to dead letter after this many failures
+ack_deadline_seconds = 3600      # max time before Pub/Sub redelivers; set >= longest expected task
+heartbeat_interval_seconds = 120 # how often to extend the ack deadline while processing
+task_timeout_seconds = 7200      # nack and give up if task exceeds this
+
+# ── Monitor (status-reporter CronJob) ────────────────────────────────────────
+[monitor]
+schedule = "*/30 * * * *"          # cron expression
+datastack = "minnie65_phase3_v1"   # which datastack's outputs to count
+
+# ── Local paths ──────────────────────────────────────────────────────────────
+# Optional. Point these at a shared filesystem to resolve per-cell synapse
+# tables / meshes without re-querying CAVE. Omit any key to fall back to CAVE
+# or a repo-relative default. Values are literal paths (single-quoted).
+[paths]
+# synapse_table_dir = '/mnt/fileshare/hks/synapse tables'   # {root_id}_syn.parquet
+# mesh_dir = '/mnt/fileshare/hks/mesh'                      # {root_id}_mesh.h5
+report_dir = 'status_reports'   # relative to repo root, or an absolute path
 
 # ── Pod resources ────────────────────────────────────────────────────────────
 [resources]
 cpu_request = "900m"
+cpu_limit = "2000m"
 ephemeral_storage_limit = "16Gi"
 ephemeral_storage_request = "4Gi"
 memory_limit = "32Gi"
